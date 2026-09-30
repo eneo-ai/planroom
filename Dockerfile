@@ -33,6 +33,7 @@ COPY --from=builder --chown=planroom:planroom /app/public ./public
 COPY --from=builder --chown=planroom:planroom /app/scripts ./scripts
 COPY --from=builder --chown=planroom:planroom /app/src/server ./src/server
 COPY --from=builder --chown=planroom:planroom /app/src/contracts.ts ./src/contracts.ts
+COPY --from=builder --chown=planroom:planroom /app/src/github-links.ts ./src/github-links.ts
 COPY --from=builder --chown=planroom:planroom /app/migrations ./migrations
 COPY --from=builder --chown=planroom:planroom /app/examples ./examples
 COPY --from=builder --chown=planroom:planroom /app/tsconfig.json ./tsconfig.json
