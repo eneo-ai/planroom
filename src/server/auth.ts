@@ -3,16 +3,14 @@ import type { PoolClient } from "pg";
 import type { ApiToken, Role, User } from "../contracts";
 import { db, transaction } from "./db";
 import { AppError, isUniqueViolation } from "./errors";
-import { hashPassword, verifyPassword } from "./passwords";
+import { hashPassword, verifyLoginPassword, verifyPassword } from "./passwords";
 
-export interface Principal {
-  user: User;
-  authentication: "session" | "token";
-  scope: "read" | "write";
-  /** Internal credential reference; never serialized in public user contracts. */
-  sessionHash?: string;
-}
-interface UserRow {
+/** Credential references are internal and never serialized in public contracts. */
+export type Principal = { user: User; scope: "read" | "write" } & (
+  | { authentication: "session"; sessionHash: string }
+  | { authentication: "token"; tokenHash: string }
+);
+export interface UserRow {
   id: string;
   name: string;
   email: string;
@@ -26,8 +24,26 @@ interface TokenRow {
   scope: "read" | "write";
   created_at: Date;
   last_used_at: Date | null;
+  expires_at: Date;
 }
 export const SESSION_COOKIE = "planroom_session";
+const LOGIN_CONCURRENCY_LIMIT = 4;
+let activeLogins = 0;
+async function recordLoginAttempt(
+  subject: string,
+  windowSeconds: number,
+  limit: number,
+  message: string,
+): Promise<void> {
+  const result = await db.query<{ attempts: number }>(
+    `INSERT INTO login_attempts(subject_hash,attempts,window_start) VALUES($1,1,now())
+    ON CONFLICT(subject_hash) DO UPDATE SET attempts=CASE WHEN login_attempts.window_start<now()-($2::int * interval '1 second') THEN 1 ELSE login_attempts.attempts+1 END,
+    window_start=CASE WHEN login_attempts.window_start<now()-($2::int * interval '1 second') THEN now() ELSE login_attempts.window_start END RETURNING attempts`,
+    [secretHash(subject), windowSeconds],
+  );
+  if (result.rows[0].attempts > limit)
+    throw new AppError(429, "RATE_LIMITED", message);
+}
 export function secretHash(secret: string): string {
   return createHash("sha256").update(secret).digest("hex");
 }
@@ -46,6 +62,7 @@ function tokenFromRow(row: TokenRow): ApiToken {
     name: row.name,
     scope: row.scope,
     createdAt: row.created_at.toISOString(),
+    expiresAt: row.expires_at.toISOString(),
     lastUsedAt: row.last_used_at?.toISOString() ?? null,
   };
 }
@@ -58,9 +75,9 @@ function cookieSecret(request: Request): string | null {
   return cookie?.slice(SESSION_COOKIE.length + 1) ?? null;
 }
 export function sessionCookie(secret: string, expired = false): string {
-  const secure = (process.env.APP_URL ?? "http://localhost:3000").startsWith(
-    "https:",
-  );
+  const secure =
+    new URL(process.env.APP_URL ?? "http://localhost:3000").protocol ===
+    "https:";
   return `${SESSION_COOKIE}=${expired ? "" : secret}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${expired ? 0 : 604800}${secure ? "; Secure" : ""}`;
 }
 export function assertReady(principal: Principal): void {
@@ -107,12 +124,17 @@ export async function findPrincipal(
   tokenOnly = false,
 ): Promise<Principal | null> {
   const authorization = request.headers.get("authorization");
-  if (authorization?.startsWith("Bearer ")) {
+  if (authorization !== null) {
+    // An explicit authentication header selects its own identity. Never fall
+    // back to a stronger cookie principal for malformed or invalid credentials.
+    const bearer = /^Bearer +(\S+)$/i.exec(authorization);
+    if (!bearer) return null;
+    const tokenHash = secretHash(bearer[1]);
     const result = await db.query<
       UserRow & { scope: "read" | "write"; token_id: string }
     >(
-      "SELECT u.*, t.scope, t.id AS token_id FROM api_tokens t JOIN users u ON u.id=t.user_id WHERE t.secret_hash=$1",
-      [secretHash(authorization.slice(7))],
+      "SELECT u.*, t.scope, t.id AS token_id FROM api_tokens t JOIN users u ON u.id=t.user_id WHERE t.secret_hash=$1 AND t.expires_at>clock_timestamp()",
+      [tokenHash],
     );
     const row = result.rows[0];
     if (!row) return null;
@@ -123,6 +145,7 @@ export async function findPrincipal(
       user: userFromRow(row),
       authentication: "token",
       scope: row.scope,
+      tokenHash,
     };
   }
   if (tokenOnly) return null;
@@ -163,52 +186,90 @@ export async function login(
   email: string,
   password: string,
 ): Promise<{ user: User; secret: string }> {
-  await db.query(
-    "DELETE FROM login_attempts WHERE window_start<now()-interval '15 minutes'",
-  );
-  const attempt = await db.query<{ attempts: number }>(
-    `INSERT INTO login_attempts(subject_hash,attempts,window_start) VALUES($1,1,now())
-    ON CONFLICT(subject_hash) DO UPDATE SET attempts=CASE WHEN login_attempts.window_start<now()-interval '15 minutes' THEN 1 ELSE login_attempts.attempts+1 END,
-    window_start=CASE WHEN login_attempts.window_start<now()-interval '15 minutes' THEN now() ELSE login_attempts.window_start END RETURNING attempts`,
-    [secretHash(email)],
-  );
-  if (attempt.rows[0].attempts > 10)
+  if (activeLogins >= LOGIN_CONCURRENCY_LIMIT)
     throw new AppError(
       429,
-      "RATE_LIMITED",
-      "För många inloggningsförsök. Försök igen om 15 minuter.",
+      "AUTH_BUSY",
+      "För många samtidiga inloggningar. Försök igen om en stund.",
     );
-  return transaction(async (client) => {
-    // Serialize verification and issuance with account replacement. A login
-    // using old credentials either precedes rotation and is revoked, or fails.
-    const result = await client.query<UserRow>(
-      "SELECT * FROM users WHERE email=$1 FOR UPDATE",
-      [email],
+  activeLogins++;
+  try {
+    await db.query(
+      "DELETE FROM login_attempts WHERE window_start<now()-interval '10 minutes'",
     );
-    const row = result.rows[0];
-    const fallback =
-      "scrypt$00000000000000000000000000000000$" + "0".repeat(128);
-    const matches = await verifyPassword(
-      password,
-      row?.password_hash ?? fallback,
+    // Consumed before an arbitrary email row or password work is admitted.
+    await recordLoginAttempt(
+      "login:global",
+      60,
+      60,
+      "Inloggningstjänstens gräns har nåtts. Försök igen om en minut.",
     );
-    if (!row || !matches)
-      throw new AppError(
-        401,
-        "INVALID_CREDENTIALS",
-        "Fel e-postadress eller lösenord.",
+    const outcome = await transaction(async (client) => {
+      // Also serializes the absent-row case. Concurrent attempts for one email
+      // cannot verify a sixth password or clear each other's failure counter.
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 1))",
+        [email],
       );
-    await client.query("DELETE FROM login_attempts WHERE subject_hash=$1", [
-      secretHash(email),
-    ]);
-    const secret = randomBytes(32).toString("base64url");
-    await client.query("DELETE FROM sessions WHERE expires_at<=now()");
-    await client.query(
-      "INSERT INTO sessions(secret_hash,user_id,expires_at) VALUES($1,$2,now()+interval '7 days')",
-      [secretHash(secret), row.id],
-    );
-    return { user: userFromRow(row), secret };
-  });
+      const previous = (
+        await client.query<{ attempts: number; active: boolean }>(
+          "SELECT attempts, window_start>clock_timestamp()-interval '10 minutes' AS active FROM login_attempts WHERE subject_hash=$1 FOR UPDATE",
+          [secretHash(email)],
+        )
+      ).rows[0];
+      const failures = previous?.active ? previous.attempts : 0;
+      if (failures >= 5)
+        return new AppError(
+          429,
+          "RATE_LIMITED",
+          "Kontot är spärrat efter fem misslyckade försök. Försök igen om tio minuter.",
+        );
+      // User lock makes old-password verification and session issuance atomic
+      // with account replacement and session/key revocation.
+      const result = await client.query<UserRow>(
+        "SELECT * FROM users WHERE email=$1 FOR UPDATE",
+        [email],
+      );
+      const row = result.rows[0];
+      const verification = await verifyLoginPassword(
+        password,
+        row?.password_hash ?? null,
+      );
+      if (!row || !verification.matches) {
+        await client.query(
+          `INSERT INTO login_attempts(subject_hash,attempts,window_start) VALUES($1,$2,clock_timestamp())
+         ON CONFLICT(subject_hash) DO UPDATE SET attempts=$2,window_start=CASE WHEN $2=1 OR $2=5 THEN clock_timestamp() ELSE login_attempts.window_start END`,
+          [secretHash(email), failures + 1],
+        );
+        // Return, then throw after commit: failed-login accounting must persist.
+        return new AppError(
+          401,
+          "INVALID_CREDENTIALS",
+          "Fel e-postadress eller lösenord.",
+        );
+      }
+      if (verification.upgradedHash !== null) {
+        await client.query("UPDATE users SET password_hash=$2 WHERE id=$1", [
+          row.id,
+          verification.upgradedHash,
+        ]);
+      }
+      await client.query("DELETE FROM login_attempts WHERE subject_hash=$1", [
+        secretHash(email),
+      ]);
+      const secret = randomBytes(32).toString("base64url");
+      await client.query("DELETE FROM sessions WHERE expires_at<=now()");
+      await client.query(
+        "INSERT INTO sessions(secret_hash,user_id,expires_at) VALUES($1,$2,now()+interval '7 days')",
+        [secretHash(secret), row.id],
+      );
+      return { user: userFromRow(row), secret };
+    });
+    if (outcome instanceof AppError) throw outcome;
+    return outcome;
+  } finally {
+    activeLogins--;
+  }
 }
 async function lockSessionUser(
   client: PoolClient,
@@ -223,7 +284,7 @@ async function lockSessionUser(
   ).rows[0];
   const session = (
     await client.query(
-      "SELECT secret_hash FROM sessions WHERE secret_hash=$1 AND user_id=$2 AND expires_at>now()",
+      "SELECT secret_hash FROM sessions WHERE secret_hash=$1 AND user_id=$2 AND expires_at>clock_timestamp() FOR SHARE",
       [principal.sessionHash, principal.user.id],
     )
   ).rows[0];
@@ -235,12 +296,62 @@ async function lockSessionUser(
     );
   return row;
 }
+/** Serialize document writes with session/key revocation and role changes. */
+export async function lockWritePrincipal(
+  client: PoolClient,
+  principal: Principal,
+): Promise<Principal> {
+  let row: UserRow;
+  if (principal.authentication === "session")
+    row = await lockSessionUser(client, principal);
+  else {
+    if (!principal.tokenHash)
+      throw new AppError(401, "UNAUTHENTICATED", "En aktiv API-nyckel krävs.");
+    const current = (
+      await client.query<UserRow>(
+        "SELECT * FROM users WHERE id=$1 FOR UPDATE",
+        [principal.user.id],
+      )
+    ).rows[0];
+    const token = (
+      await client.query<{ scope: "read" | "write" }>(
+        "SELECT scope FROM api_tokens WHERE secret_hash=$1 AND user_id=$2 AND expires_at>clock_timestamp() FOR SHARE",
+        [principal.tokenHash, principal.user.id],
+      )
+    ).rows[0];
+    if (!current || !token)
+      throw new AppError(
+        401,
+        "UNAUTHENTICATED",
+        "API-nyckeln har återkallats. Anslut igen.",
+      );
+    row = current;
+    principal = { ...principal, scope: token.scope };
+  }
+  const verified: Principal = { ...principal, user: userFromRow(row) };
+  assertWrite(verified);
+  return verified;
+}
 export async function logout(request: Request): Promise<void> {
   const secret = cookieSecret(request);
-  if (secret)
-    await db.query("DELETE FROM sessions WHERE secret_hash=$1", [
-      secretHash(secret),
+  if (!secret) return;
+  const hash = secretHash(secret);
+  const session = (
+    await db.query<{ user_id: string }>(
+      "SELECT user_id FROM sessions WHERE secret_hash=$1",
+      [hash],
+    )
+  ).rows[0];
+  if (!session) return;
+  await transaction(async (client) => {
+    await client.query("SELECT id FROM users WHERE id=$1 FOR UPDATE", [
+      session.user_id,
     ]);
+    await client.query(
+      "DELETE FROM sessions WHERE secret_hash=$1 AND user_id=$2",
+      [hash, session.user_id],
+    );
+  });
 }
 export async function replaceAccount(
   principal: Principal,
@@ -346,10 +457,13 @@ export async function deleteToken(
       "SESSION_REQUIRED",
       "Hantera API-nycklar i webbsidan.",
     );
-  await db.query("DELETE FROM api_tokens WHERE id=$1 AND user_id=$2", [
-    id,
-    principal.user.id,
-  ]);
+  await transaction(async (client) => {
+    await lockSessionUser(client, principal);
+    await client.query("DELETE FROM api_tokens WHERE id=$1 AND user_id=$2", [
+      id,
+      principal.user.id,
+    ]);
+  });
 }
 export async function listUsers(principal: Principal): Promise<User[]> {
   assertAdmin(principal);

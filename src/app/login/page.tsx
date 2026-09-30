@@ -114,6 +114,10 @@ export default function LoginPage() {
             />
           </form>
           <p className="fine-print">
+            Efter fem misslyckade inloggningsförsök spärras nya försök i tio
+            minuter. Försök igen när spärren har gått ut.
+          </p>
+          <p className="fine-print">
             Första gången? Använd startkontot som konfigurerats av
             administratören. Du får sedan välja dina egna uppgifter.
           </p>

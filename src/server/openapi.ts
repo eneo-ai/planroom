@@ -155,14 +155,15 @@ const security = {
   public: [],
 } satisfies Record<string, SecurityRequirement[]>;
 const errorDescriptions: Record<number, string> = {
-  400: "VALIDATION_ERROR, INVALID_JSON, INVALID_ID or INVALID_REVISION. Account updates can also return PASSWORD_UNCHANGED or EMAIL_UNCHANGED.",
+  400: "VALIDATION_ERROR, INVALID_JSON, INVALID_ID, INVALID_REVISION or REQUEST_ABORTED. Account updates can also return PASSWORD_UNCHANGED or EMAIL_UNCHANGED.",
   401: "UNAUTHENTICATED or INVALID_CREDENTIALS. The session/token is missing, expired or revoked, or the supplied password is incorrect.",
   403: "FORBIDDEN, ACCOUNT_SETUP_REQUIRED, SESSION_REQUIRED or INVALID_ORIGIN. Complete account setup, use the required role/scope, or send a same-origin session request.",
   404: "NOT_FOUND. The document or historical revision does not exist.",
+  408: "BODY_TIMEOUT. The JSON request body was not received within 30 seconds; submit a complete request.",
   409: "REVISION_CONFLICT includes error.currentRevision: fetch the latest document and reconcile changes before resubmitting. Account/user creation can instead return EMAIL_IN_USE.",
   413: "BODY_TOO_LARGE. JSON request bodies are limited to 3 MiB before parsing, including UTF-8 HTML and escaping overhead.",
   415: "UNSUPPORTED_MEDIA_TYPE. JSON mutations require Content-Type: application/json.",
-  429: "RATE_LIMITED. Too many failed login attempts for this email; wait for the 15-minute window to expire.",
+  429: "RATE_LIMITED or AUTH_BUSY. Five failed logins lock the account for ten minutes. Login admission also permits at most four concurrent requests and 60 attempts per minute across the installation. Password work permits four concurrent operations without queuing; retry later when busy.",
   500: "INTERNAL_ERROR. The operation could not be completed; no implementation details are returned.",
   503: "CONFIGURATION_ERROR. Same-origin mutations require the deployment's APP_URL configuration.",
 };
@@ -336,7 +337,7 @@ export const openApiDocument: OpenApiDocument = {
             ),
             headers: cookieHeader,
           },
-          ...errors(400, 401, 403, 413, 415, 429, 500, 503),
+          ...errors(400, 401, 403, 408, 413, 415, 429, 500, 503),
         },
       },
     },
@@ -398,7 +399,7 @@ export const openApiDocument: OpenApiDocument = {
             ),
             headers: cookieHeader,
           },
-          ...errors(400, 401, 403, 409, 413, 415, 500, 503),
+          ...errors(400, 401, 403, 408, 409, 413, 415, 429, 500, 503),
         },
       },
     },
@@ -446,7 +447,7 @@ export const openApiDocument: OpenApiDocument = {
         requestBody: body("DocumentContent"),
         responses: {
           "201": jsonResponse("New current document.", "DocumentDetail"),
-          ...errors(400, 401, 403, 413, 415, 500, 503),
+          ...errors(400, 401, 403, 408, 413, 415, 500, 503),
         },
       },
     },
@@ -478,7 +479,7 @@ export const openApiDocument: OpenApiDocument = {
         requestBody: body("DocumentUpdate"),
         responses: {
           "200": jsonResponse("New current revision.", "DocumentDetail"),
-          ...errors(400, 401, 403, 404, 409, 413, 415, 500, 503),
+          ...errors(400, 401, 403, 404, 408, 409, 413, 415, 500, 503),
         },
       },
     },
@@ -534,7 +535,7 @@ export const openApiDocument: OpenApiDocument = {
             "New current revision containing the historical content.",
             "DocumentDetail",
           ),
-          ...errors(400, 401, 403, 404, 409, 413, 415, 500, 503),
+          ...errors(400, 401, 403, 404, 408, 409, 413, 415, 500, 503),
         },
       },
     },
@@ -566,7 +567,7 @@ export const openApiDocument: OpenApiDocument = {
         requestBody: body("CommentRequest"),
         responses: {
           "201": jsonResponse("Created comment.", "Comment"),
-          ...errors(400, 401, 403, 404, 413, 415, 500, 503),
+          ...errors(400, 401, 403, 404, 408, 413, 415, 500, 503),
         },
       },
     },
@@ -614,7 +615,7 @@ export const openApiDocument: OpenApiDocument = {
         operationId: "createApiKey",
         summary: "Create a scoped personal API key",
         description:
-          "Requires an active browser session and same-origin Origin. Viewers can create read keys; admin/editor users can create read or write keys. The secret appears only in this response; keep it outside source control. Keys inherit the user's current role on every request." +
+          "Requires an active browser session and same-origin Origin. Viewers can create read keys; admin/editor users can create read or write keys. Keys expire 90 days after creation; expiresAt is included in the metadata. Create a replacement before expiry and update your client. The secret appears only in this response; keep it outside source control. Keys inherit the user's current role on every request, and document writes revalidate credentials inside their transaction." +
           ready,
         tags: ["API keys"],
         security: security.session,
@@ -625,7 +626,7 @@ export const openApiDocument: OpenApiDocument = {
             "One-time secret plus key metadata.",
             "CreatedTokenResponse",
           ),
-          ...errors(400, 401, 403, 413, 415, 500, 503),
+          ...errors(400, 401, 403, 408, 413, 415, 500, 503),
         },
       },
     },
@@ -681,7 +682,7 @@ export const openApiDocument: OpenApiDocument = {
             "New user with mustChangePassword=true.",
             "UserResponse",
           ),
-          ...errors(400, 401, 403, 409, 413, 415, 500, 503),
+          ...errors(400, 401, 403, 408, 409, 413, 415, 429, 500, 503),
         },
       },
     },

@@ -9,6 +9,7 @@ import {
 import { transaction } from "./db";
 import { createDocumentInTransaction } from "./documents";
 import { hashPassword } from "./passwords";
+import { userFromRow, type UserRow } from "./auth";
 
 /** Persisted markers survive renaming/deleting the original admin. */
 export async function seedBootstrap(): Promise<void> {
@@ -29,34 +30,24 @@ export async function seedBootstrap(): Promise<void> {
     );
     const password = passwordSchema.parse(process.env.SEED_ADMIN_PASSWORD);
     const id = randomUUID();
-    await client.query(
-      "INSERT INTO users(id,name,email,password_hash,role,must_change_password) VALUES($1,'Startadministratör',$2,$3,'admin',true)",
+    const created = await client.query<UserRow>(
+      "INSERT INTO users(id,name,email,password_hash,role,must_change_password) VALUES($1,'Startadministratör',$2,$3,'admin',true) RETURNING *",
       [id, email, await hashPassword(password)],
     );
     if (process.env.SEED_EXAMPLE === "true") {
       const html = await readFile(
-        resolve(process.cwd(), "examples/orchestrator.html"),
+        resolve(process.cwd(), "examples/planning-demo.html"),
         "utf8",
       );
       await createDocumentInTransaction(
         client,
-        {
-          user: {
-            id,
-            name: "Startadministratör",
-            email,
-            role: "admin",
-            mustChangePassword: false,
-          },
-          authentication: "session",
-          scope: "write",
-        },
+        userFromRow(created.rows[0]),
         documentContentSchema.parse({
-          title: "Orkestreraren i Eneo",
+          title: "Lansering av en kundportal",
           description: "Exempel på en visuell HTML-planering.",
           html,
           instructions:
-            "Bevara dokumentets diagram, layout och interaktivitet. Läs senaste versionen före ändringar och beskriv vad som uppdaterats.",
+            "Bevara planeringens diagram, layout och interaktivitet. Läs senaste versionen före ändringar och beskriv vad som uppdaterats. Detta är ett syntetiskt exempel utan riktiga kund- eller projektuppgifter.",
           status: "draft",
           changeSummary: "Importerad exempelplanering vid första uppstarten.",
         }),

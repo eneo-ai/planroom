@@ -21,7 +21,10 @@ export function ApiTokens() {
   const [hasLoaded, setHasLoaded] = useState(false);
   const [name, setName] = useState("");
   const [scope, setScope] = useState("read");
-  const [secret, setSecret] = useState<string | null>(null);
+  const [secret, setSecret] = useState<{
+    token: string;
+    expiresAt: string;
+  } | null>(null);
   const [revoke, setRevoke] = useState<ApiToken | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -57,7 +60,7 @@ export function ApiTokens() {
         { method: "POST", body: JSON.stringify(parsed.data) },
       );
       setTokens((current) => [result.record, ...current]);
-      setSecret(result.token);
+      setSecret({ token: result.token, expiresAt: result.record.expiresAt });
       setCopied(false);
       setName("");
     } catch (cause) {
@@ -83,7 +86,7 @@ export function ApiTokens() {
   async function copy() {
     if (!secret) return;
     try {
-      await navigator.clipboard.writeText(secret);
+      await navigator.clipboard.writeText(secret.token);
       setCopied(true);
     } catch {
       setError(
@@ -99,7 +102,8 @@ export function ApiTokens() {
           Ge nyckeln ett namn för den AI-klient du ska ansluta. Välj endast
           läsning för att granska planer eller läsning och uppdatering för att
           även spara ändringar. Kopiera nyckeln när den visas och spara den
-          säkert.
+          säkert. Nyckeln gäller i 90 dagar. Skapa en ny och byt nyckeln i
+          klienten innan den gamla går ut.
         </p>
       </div>
       {error && (
@@ -162,6 +166,14 @@ export function ApiTokens() {
               <div>
                 <strong>{token.name}</strong>
                 <p className="muted">
+                  {Date.parse(token.expiresAt) <= Date.now()
+                    ? "Utgången sedan "
+                    : "Giltig till "}
+                  <time dateTime={token.expiresAt}>
+                    {formatDate(token.expiresAt)}
+                  </time>
+                </p>
+                <p className="muted">
                   {token.scope === "write"
                     ? "Läsa och uppdatera"
                     : "Endast läsa"}{" "}
@@ -203,13 +215,24 @@ export function ApiTokens() {
           />
           <TextArea
             label="Åtkomstnyckel"
-            value={secret ?? ""}
+            value={secret?.token ?? ""}
             isReadOnly
             rows={3}
             width="100%"
             hasSpellCheck={false}
             className="code-editor"
           />
+          {secret && (
+            <p>
+              Giltig till{" "}
+              <time dateTime={secret.expiresAt}>
+                {formatDate(secret.expiresAt)}
+              </time>
+              . Spara datumet tillsammans med nyckeln. Skapa en ny nyckel och
+              uppdatera klientens inställningar före detta datum; förnyelse sker
+              manuellt.
+            </p>
+          )}
           {error && (
             <Banner
               status="error"

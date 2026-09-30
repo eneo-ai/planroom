@@ -4,6 +4,8 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createPlanroomServer } from "../src/mcp/server";
 import { POST } from "../src/app/api/mcp/route";
 import type { Principal } from "../src/server/auth";
+import * as auth from "../src/server/auth";
+import { AppError } from "../src/server/errors";
 
 const principal: Principal = {
   user: {
@@ -14,9 +16,13 @@ const principal: Principal = {
     mustChangePassword: false,
   },
   authentication: "token",
+  tokenHash: "0".repeat(64),
   scope: "read",
 };
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+});
 
 async function connect(identity: Principal) {
   const server = createPlanroomServer(identity);
@@ -96,6 +102,71 @@ describe("MCP permissions through the official SDK", () => {
 });
 
 describe("MCP endpoint security", () => {
+  it("rejects a credential revoked while a slow request body is being read", async () => {
+    vi.stubEnv("APP_URL", "http://localhost:3210");
+    let revoked = false;
+    vi.spyOn(auth, "requirePrincipal").mockImplementation(async () => {
+      if (revoked)
+        throw new AppError(
+          401,
+          "UNAUTHENTICATED",
+          "API-nyckeln har återkallats.",
+        );
+      return principal;
+    });
+    let bodyStarted = () => {};
+    const reading = new Promise<void>((resolve) => {
+      bodyStarted = resolve;
+    });
+    let finishBody = () => {};
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":',
+          ),
+        );
+        finishBody = () => {
+          controller.enqueue(
+            encoder.encode(
+              JSON.stringify({
+                name: "read_document",
+                arguments: { id: principal.user.id },
+              }) + "}",
+            ),
+          );
+          controller.close();
+        };
+      },
+      pull() {
+        bodyStarted();
+      },
+    });
+    const init = {
+      method: "POST",
+      headers: {
+        host: "localhost:3210",
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+        Authorization: "Bearer test-only-key",
+      },
+      body,
+      duplex: "half" as const,
+    };
+    const pending = POST(new Request("http://localhost:3210/api/mcp", init));
+    await reading;
+    revoked = true;
+    finishBody();
+    const response = await pending;
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "UNAUTHENTICATED",
+        message: "API-nyckeln har återkallats.",
+      },
+    });
+  });
   it("rejects an unconfigured host before authentication", async () => {
     vi.stubEnv("APP_URL", "http://localhost:3210");
     const response = await POST(

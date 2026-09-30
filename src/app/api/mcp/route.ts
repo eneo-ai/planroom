@@ -36,7 +36,7 @@ function verifyEndpoint(request: Request) {
 export async function POST(request: Request): Promise<Response> {
   return api(async () => {
     verifyEndpoint(request);
-    const principal = await requirePrincipal(request, { tokenOnly: true });
+    await requirePrincipal(request, { tokenOnly: true });
     const parsedBody = await readJson(request, z.unknown());
     if (Array.isArray(parsedBody))
       throw new AppError(
@@ -44,6 +44,9 @@ export async function POST(request: Request): Promise<Response> {
         "BATCH_NOT_SUPPORTED",
         "Send one MCP message per request.",
       );
+    // Body admission may wait for a slow sender. Bind tools only to credentials
+    // that are still active after reading, including read-only tools.
+    const principal = await requirePrincipal(request, { tokenOnly: true });
     const server = createPlanroomServer(principal);
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,

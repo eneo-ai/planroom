@@ -9,8 +9,14 @@ import type {
   DocumentUpdate,
   RevisionDetail,
   RevisionSummary,
+  User,
 } from "../contracts";
-import { assertReady, assertWrite, type Principal } from "./auth";
+import {
+  assertReady,
+  assertWrite,
+  lockWritePrincipal,
+  type Principal,
+} from "./auth";
 import { db, transaction } from "./db";
 import { AppError, notFound } from "./errors";
 
@@ -117,7 +123,7 @@ export async function getDocument(
 }
 async function insertRevision(
   client: PoolClient,
-  principal: Principal,
+  author: User,
   id: string,
   number: number,
   content: DocumentContent,
@@ -134,7 +140,7 @@ async function insertRevision(
       content.instructions,
       content.status,
       content.changeSummary,
-      principal.user.id,
+      author.id,
     ],
   );
 }
@@ -143,23 +149,26 @@ export async function createDocument(
   content: DocumentContent,
 ): Promise<DocumentDetail> {
   assertWrite(principal);
-  return transaction((client) =>
-    createDocumentInTransaction(client, principal, content),
+  return transaction(async (client) =>
+    createDocumentInTransaction(
+      client,
+      (await lockWritePrincipal(client, principal)).user,
+      content,
+    ),
   );
 }
 /** Used by the one-time bootstrap in its existing database transaction. */
 export async function createDocumentInTransaction(
   client: PoolClient,
-  principal: Principal,
+  author: User,
   content: DocumentContent,
 ): Promise<DocumentDetail> {
-  assertWrite(principal);
   const id = randomUUID();
   await client.query(
     "INSERT INTO documents(id,current_revision) VALUES($1,1)",
     [id],
   );
-  await insertRevision(client, principal, id, 1, content);
+  await insertRevision(client, author, id, 1, content);
   return fetchDocument(client, id);
 }
 async function lockRevision(
@@ -200,8 +209,9 @@ export async function updateDocument(
 ): Promise<DocumentDetail> {
   assertWrite(principal);
   return transaction(async (client) => {
+    const verified = await lockWritePrincipal(client, principal);
     const next = await lockRevision(client, id, content.expectedRevision);
-    await insertRevision(client, principal, id, next, content);
+    await insertRevision(client, verified.user, id, next, content);
     return advance(client, id, next);
   });
 }
@@ -238,6 +248,7 @@ export async function restoreDocument(
 ): Promise<DocumentDetail> {
   assertWrite(principal);
   return transaction(async (client) => {
+    const verified = await lockWritePrincipal(client, principal);
     const next = await lockRevision(client, id, input.expectedRevision);
     const source = (
       await client.query<RevisionRow>(
@@ -246,7 +257,7 @@ export async function restoreDocument(
       )
     ).rows[0];
     if (!source) notFound();
-    await insertRevision(client, principal, id, next, {
+    await insertRevision(client, verified.user, id, next, {
       title: source.title,
       description: source.description,
       html: source.html,
@@ -290,10 +301,17 @@ export async function addComment(
   input: { body: string; sectionId?: string | null },
 ): Promise<Comment> {
   assertWrite(principal);
-  await getDocument(principal, id);
-  const result = await db.query<CommentRow>(
-    "WITH c AS (INSERT INTO comments(id,document_id,author_id,body,section_id) VALUES($1,$2,$3,$4,$5) RETURNING *) SELECT c.*,u.name AS author_name FROM c JOIN users u ON u.id=c.author_id",
-    [randomUUID(), id, principal.user.id, input.body, input.sectionId ?? null],
-  );
-  return comment(result.rows[0]);
+  return transaction(async (client) => {
+    const verified = await lockWritePrincipal(client, principal);
+    if (
+      !(await client.query("SELECT id FROM documents WHERE id=$1", [id]))
+        .rows[0]
+    )
+      notFound();
+    const result = await client.query<CommentRow>(
+      "WITH c AS (INSERT INTO comments(id,document_id,author_id,body,section_id) VALUES($1,$2,$3,$4,$5) RETURNING *) SELECT c.*,u.name AS author_name FROM c JOIN users u ON u.id=c.author_id",
+      [randomUUID(), id, verified.user.id, input.body, input.sectionId ?? null],
+    );
+    return comment(result.rows[0]);
+  });
 }

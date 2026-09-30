@@ -131,4 +131,40 @@ describe("Claude Desktop stdio bridge", () => {
     expect(stderr).not.toContain(secret);
     expect(stderr).not.toContain("attacker");
   });
+  it.each([
+    ["http://plans.example.test", "http://plans.example.test/api/mcp"],
+    ["http://192.168.1.20", "http://app:3000/api/mcp"],
+  ])(
+    "rejects plaintext credentials for remote deployments: %s",
+    async (application, endpoint) => {
+      const secret = "pr_test_never_send_this_secret";
+      const child = spawn(process.execPath, ["--import", fixture, script], {
+        env: {
+          NODE_ENV: "test",
+          APP_URL: application,
+          PLANROOM_MCP_URL: endpoint,
+          PLANROOM_API_KEY: secret,
+        },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk: Buffer) => {
+        stdout += chunk.toString("utf8");
+      });
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString("utf8");
+      });
+      child.stdin.end();
+      const exitCode = await new Promise<number | null>((resolve, reject) => {
+        child.once("error", reject);
+        child.once("exit", resolve);
+      });
+      expect(exitCode).toBe(1);
+      expect(stdout).toBe("");
+      expect(stderr).toContain("Planroom MCP bridge");
+      expect(stderr).not.toContain(secret);
+      expect(stderr).not.toContain(application);
+    },
+  );
 });

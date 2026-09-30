@@ -34,6 +34,14 @@ function configuration() {
       throw new Error("Invalid endpoint");
   }
   const internal = endpoint.href === "http://app:3000/api/mcp";
+  for (const url of [application, ...(internal ? [] : [endpoint])]) {
+    const loopback =
+      url.hostname === "localhost" ||
+      url.hostname === "[::1]" ||
+      /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(url.hostname);
+    if (url.protocol !== "https:" && !loopback)
+      throw new Error("Remote connections require HTTPS");
+  }
   if (
     application.pathname !== "/" ||
     endpoint.pathname !== "/api/mcp" ||

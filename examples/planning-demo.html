@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="sv">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lansering av en kundportal · Exempelplanering</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: system-ui, sans-serif;
+        color: #18233a;
+        background: #f3f5fa;
+        line-height: 1.65;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; }
+      main { max-width: 1080px; margin: auto; padding: 48px 24px 72px; }
+      header { padding-bottom: 24px; }
+      .eyebrow { color: #4857c2; font-size: .8rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+      h1 { font-size: clamp(2rem, 5vw, 3.5rem); line-height: 1.15; letter-spacing: -.04em; margin: 12px 0; }
+      h2 { font-size: 1.4rem; margin-top: 0; }
+      h3 { margin-bottom: 8px; }
+      p { max-width: 72ch; }
+      nav { display: flex; gap: 8px; flex-wrap: wrap; margin: 20px 0 32px; }
+      a { color: #303f9e; text-underline-offset: 3px; }
+      nav a { padding: 8px 14px; background: white; border: 1px solid #dce1ed; border-radius: 8px; }
+      a:focus-visible, summary:focus-visible, input:focus-visible { outline: 3px solid #4857c2; outline-offset: 3px; }
+      section { padding: 28px; margin-bottom: 24px; border: 1px solid #dce1ed; border-radius: 16px; background: white; scroll-margin-top: 24px; }
+      .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+      .metric { border-left: 3px solid #4857c2; padding-left: 16px; }
+      .metric strong { display: block; font-size: 1.15rem; }
+      .metric span, .muted { color: #5b667a; }
+      .table-wrap { overflow-x: auto; }
+      table { border-collapse: collapse; width: 100%; min-width: 560px; text-align: left; }
+      th, td { padding: 12px; border-bottom: 1px solid #dce1ed; vertical-align: top; }
+      th { color: #5b667a; font-size: .85rem; }
+      .badge { display: inline-block; padding: 2px 9px; border-radius: 6px; background: #edf0fc; color: #303f9e; font-size: .8rem; white-space: nowrap; }
+      .checklist { list-style: none; padding: 0; }
+      .checklist li { padding: 10px 0; border-bottom: 1px solid #e8ecf3; }
+      label { display: flex; gap: 12px; align-items: baseline; cursor: pointer; }
+      input { accent-color: #4857c2; }
+      details { padding: 16px 0; border-top: 1px solid #dce1ed; }
+      summary { cursor: pointer; font-weight: 600; }
+      footer { color: #5b667a; font-size: .85rem; }
+      @media (max-width: 640px) { main { padding: 28px 16px; } section { padding: 20px; } .grid { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">Exempelplanering · Helt fiktivt projekt</p>
+        <h1>Lansering av en kundportal</h1>
+        <p>En gemensam plan för att ge kunder en tydlig överblick över sina ärenden. Använd detta fristående exempel som startpunkt för era egna mål, beslut och leveranser.</p>
+      </header>
+      <nav aria-label="Avsnitt i planeringen">
+        <a href="#mal">Mål</a>
+        <a href="#leveranser">Leveranser</a>
+        <a href="#checklista">Checklista</a>
+        <a href="#beslut">Beslut</a>
+      </nav>
+      <section id="mal" aria-labelledby="mal-rubrik">
+        <h2 id="mal-rubrik">Vad vi vill uppnå</h2>
+        <div class="grid">
+          <div class="metric"><strong>Tydlig status</strong><span>Kunden ser var ärendet befinner sig.</span></div>
+          <div class="metric"><strong>En gemensam vy</strong><span>Teamet arbetar utifrån samma information.</span></div>
+          <div class="metric"><strong>En trygg lansering</strong><span>Vi provar först med en mindre pilotgrupp.</span></div>
+        </div>
+        <p class="muted">Omfattning för första versionen: inloggning, ärendelista och ärendedetaljer. Meddelanden och betalningar planeras i en senare iteration.</p>
+        <svg viewBox="0 0 840 110" role="img" aria-labelledby="flode-titel flode-beskrivning" style="display: block; width: 100%; margin-top: 24px">
+          <title id="flode-titel">Från behov till pilot</title>
+          <desc id="flode-beskrivning">Teamet kartlägger behov, bygger en avgränsad lösning och samlar återkoppling från en pilot.</desc>
+          <rect x="5" y="20" width="230" height="65" rx="12" fill="#edf0fc" />
+          <rect x="305" y="20" width="230" height="65" rx="12" fill="#edf0fc" />
+          <rect x="605" y="20" width="230" height="65" rx="12" fill="#edf0fc" />
+          <path d="M245 52h50m-10-8 10 8-10 8M545 52h50m-10-8 10 8-10 8" fill="none" stroke="#4857c2" stroke-width="2" />
+          <g fill="#303f9e" font-size="18" text-anchor="middle"><text x="120" y="59">Kartlägg behov</text><text x="420" y="59">Bygg och granska</text><text x="720" y="59">Pilot och återkoppling</text></g>
+        </svg>
+      </section>
+      <section id="leveranser" aria-labelledby="leveranser-rubrik">
+        <h2 id="leveranser-rubrik">Leveranser och ansvar</h2>
+        <div class="table-wrap">
+          <table>
+            <caption>Planerade utvecklingsdelar för pilotversionen</caption>
+            <thead><tr><th scope="col">Utvecklingsdel</th><th scope="col">Ansvar</th><th scope="col">Klart när</th><th scope="col">Status</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">Behov och användarflöden</th><td>Produktteamet</td><td>Pilotens tre viktigaste flöden är godkända.</td><td><span class="badge">Klart</span></td></tr>
+              <tr><th scope="row">Ärendeöversikt</th><td>Webbteamet</td><td>Listan visar status och kan användas med tangentbord.</td><td><span class="badge">Pågår</span></td></tr>
+              <tr><th scope="row">Pilot och återkoppling</th><td>Hela teamet</td><td>Återkopplingen är sammanställd och nästa steg beslutade.</td><td><span class="badge">Planerat</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section id="checklista" aria-labelledby="checklista-rubrik">
+        <h2 id="checklista-rubrik">Inför piloten</h2>
+        <p class="muted">Checkboxarna går att prova i visningen. Spara ändringar i själva planeringen för att bevara beslut och status.</p>
+        <ul class="checklist">
+          <li><label><input type="checkbox" checked />Pilotens omfattning är avgränsad.</label></li>
+          <li><label><input type="checkbox" />Behörigheter och felmeddelanden är granskade.</label></li>
+          <li><label><input type="checkbox" />Tangentbordsnavigation fungerar i de viktigaste flödena.</label></li>
+          <li><label><input type="checkbox" />Återställning och supportkontakt är dokumenterade.</label></li>
+        </ul>
+      </section>
+      <section id="beslut" aria-labelledby="beslut-rubrik">
+        <h2 id="beslut-rubrik">Beslut att följa upp</h2>
+        <details open>
+          <summary>Vilka kunder deltar i piloten?</summary>
+          <p>Börja med en liten grupp frivilliga deltagare. Produktteamet sammanställer behov och återkoppling före nästa iteration.</p>
+        </details>
+        <details>
+          <summary>Vad händer om lanseringen behöver pausas?</summary>
+          <p>Återgå till det tidigare arbetssättet, samla fel och besluta om en ny pilot. Lägg till en ansvarig och en tydlig återställningsplan i er verkliga planering.</p>
+        </details>
+      </section>
+      <footer>Planrooms öppna demo · Inga verkliga personer, kunduppgifter eller interna projekt · MIT</footer>
+    </main>
+  </body>
+</html>

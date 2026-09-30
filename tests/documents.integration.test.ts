@@ -1,4 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { scrypt } from "node:crypto";
+import { verifyPassword } from "../src/server/passwords";
 import { db } from "../src/server/db";
 import { migrate } from "../src/server/migrate";
 import { seedBootstrap } from "../src/server/bootstrap";
@@ -10,6 +14,8 @@ import {
   login,
   replaceAccount,
   requirePrincipal,
+  logout,
+  secretHash,
   type Principal,
 } from "../src/server/auth";
 import {
@@ -19,6 +25,8 @@ import {
   listRevisions,
   restoreDocument,
   updateDocument,
+  addComment,
+  listComments,
 } from "../src/server/documents";
 import { AppError } from "../src/server/errors";
 import { documentContentSchema } from "../src/contracts";
@@ -123,6 +131,150 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     const users = (await db.query<{ email: string }>("SELECT email FROM users"))
       .rows;
     expect(users).toEqual([{ email: "real-admin@example.test" }]);
+  });
+  it("upgrades a legacy hash during successful login without changing the password or revoking existing credentials", async () => {
+    const email = "legacy-upgrade@example.test";
+    const startingPassword = "Legacy initial password 123";
+    const password = "Legacy current password 456";
+    const user = await createUser(principal, {
+      name: "Legacy user",
+      email,
+      password: startingPassword,
+      role: "editor",
+    });
+    const initial = await login(email, startingPassword);
+    const ready = await replaceAccount(await sessionPrincipal(initial.secret), {
+      name: user.name,
+      email,
+      currentPassword: startingPassword,
+      password,
+    });
+    const identity = await sessionPrincipal(ready.secret);
+    const key = await createToken(identity, {
+      name: "Preserved legacy key",
+      scope: "write",
+    });
+    const salt = "0123456789abcdef".repeat(2);
+    const digest = await new Promise<Buffer>((resolve, reject) =>
+      scrypt(
+        password,
+        salt,
+        64,
+        { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 },
+        (error, value) => (error ? reject(error) : resolve(value)),
+      ),
+    );
+    const legacy = `scrypt$${salt}$${digest.toString("hex")}`;
+    await db.query("UPDATE users SET password_hash=$2 WHERE id=$1", [
+      user.id,
+      legacy,
+    ]);
+    await expect(login(email, "Wrong password")).rejects.toMatchObject({
+      status: 401,
+      code: "INVALID_CREDENTIALS",
+    });
+    expect(
+      (
+        await db.query<{ password_hash: string }>(
+          "SELECT password_hash FROM users WHERE id=$1",
+          [user.id],
+        )
+      ).rows[0].password_hash,
+    ).toBe(legacy);
+    const loggedIn = await login(email, password);
+    expect(loggedIn.user).toEqual(identity.user);
+    const upgraded = (
+      await db.query<{ password_hash: string }>(
+        "SELECT password_hash FROM users WHERE id=$1",
+        [user.id],
+      )
+    ).rows[0].password_hash;
+    expect(upgraded).toMatch(/^scrypt\$v2\$[a-f0-9]{32}\$[a-f0-9]{128}$/);
+    expect(await verifyPassword(password, upgraded)).toBe(true);
+    expect((await sessionPrincipal(ready.secret)).user.id).toBe(user.id);
+    expect((await sessionPrincipal(loggedIn.secret)).user.id).toBe(user.id);
+    expect(
+      (
+        await requirePrincipal(
+          new Request("http://localhost/api", {
+            headers: { authorization: `Bearer ${key.token}` },
+          }),
+          { tokenOnly: true },
+        )
+      ).user.id,
+    ).toBe(user.id);
+    expect(
+      (
+        await db.query("SELECT secret_hash FROM sessions WHERE user_id=$1", [
+          user.id,
+        ])
+      ).rows,
+    ).toHaveLength(2);
+    expect(
+      (await db.query("SELECT id FROM api_tokens WHERE user_id=$1", [user.id]))
+        .rows,
+    ).toEqual([{ id: key.record.id }]);
+    await login(email, password);
+    expect(
+      (
+        await db.query<{ password_hash: string }>(
+          "SELECT password_hash FROM users WHERE id=$1",
+          [user.id],
+        )
+      ).rows[0].password_hash,
+    ).toBe(upgraded);
+    await deleteToken(identity, key.record.id);
+  });
+  it("uses case-insensitive bearer identity without falling back to a stronger cookie session", async () => {
+    const account = await login(
+      "real-admin@example.test",
+      "Changed long password 456",
+    );
+    const cookie = `planroom_session=${account.secret}`;
+    const key = await createToken(principal, {
+      name: "Bearer precedence",
+      scope: "read",
+    });
+    expect(
+      (
+        await requirePrincipal(
+          new Request("http://localhost/api", { headers: { cookie } }),
+        )
+      ).authentication,
+    ).toBe("session");
+    for (const scheme of ["bearer", "bEaReR"]) {
+      const request = new Request("http://localhost/api", {
+        headers: { cookie, authorization: `${scheme} ${key.token}` },
+      });
+      const identity = await requirePrincipal(request);
+      expect(identity.authentication).toBe("token");
+      expect(identity.scope).toBe("read");
+      await expect(
+        requirePrincipal(request, { write: true }),
+      ).rejects.toMatchObject({ status: 403, code: "FORBIDDEN" });
+      await expect(createDocument(identity, content)).rejects.toMatchObject({
+        status: 403,
+        code: "FORBIDDEN",
+      });
+    }
+    for (const authorization of [
+      "",
+      "Basic synthetic",
+      "Bearer",
+      "Bearer not-a-valid-key",
+      "bearer not-a-valid-key",
+      `Other ${key.token}`,
+    ]) {
+      const request = new Request("http://localhost/api", {
+        headers: { cookie, authorization },
+      });
+      expect(await findPrincipal(request)).toBeNull();
+      await expect(requirePrincipal(request)).rejects.toMatchObject({
+        status: 401,
+        code: "UNAUTHENTICATED",
+      });
+    }
+    await deleteToken(principal, key.record.id);
   });
   it("allows one concurrent update, rolls back the loser, and restores into a new revision", async () => {
     const original = await createDocument(principal, content);
@@ -266,12 +418,16 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
   it("successful logins do not accumulate into a lockout", async () => {
     for (let index = 0; index < 11; index++)
       await login("real-admin@example.test", "Changed long password 456");
-    expect((await db.query("SELECT * FROM login_attempts")).rows).toHaveLength(
-      0,
-    );
+    expect(
+      (
+        await db.query("SELECT * FROM login_attempts WHERE subject_hash=$1", [
+          secretHash("real-admin@example.test"),
+        ])
+      ).rows,
+    ).toHaveLength(0);
   });
   it("persists failed-login limits and blocks further attempts in the same window", async () => {
-    for (let index = 0; index < 10; index++)
+    for (let index = 0; index < 5; index++)
       await expect(
         login("missing@example.test", "Wrong password"),
       ).rejects.toMatchObject({ status: 401 });
@@ -281,10 +437,11 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     expect(
       (
         await db.query<{ attempts: number }>(
-          "SELECT attempts FROM login_attempts",
+          "SELECT attempts FROM login_attempts WHERE subject_hash=$1",
+          [secretHash("missing@example.test")],
         )
       ).rows[0].attempts,
-    ).toBe(11);
+    ).toBe(5);
   });
   it("serializes an old-password login behind account rotation and rejects a revoked principal's token issuance", async () => {
     const email = "rotation-race@example.test";
@@ -545,4 +702,461 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
       await deleteToken(principal, readerToken.record.id);
     }
   });
+  it("rejects previously authenticated but revoked tokens and sessions for every document write", async () => {
+    const document = await createDocument(principal, content);
+    const baseline = (
+      await db.query<{ count: string }>("SELECT count(*) FROM documents")
+    ).rows[0].count;
+    const key = await createToken(principal, {
+      name: "Revoked write regression",
+      scope: "write",
+    });
+    const tokenPrincipal = await requirePrincipal(
+      new Request("http://localhost/api/mcp", {
+        headers: { authorization: `Bearer ${key.token}` },
+      }),
+      { tokenOnly: true },
+    );
+    await deleteToken(principal, key.record.id);
+    const account = await login(
+      "real-admin@example.test",
+      "Changed long password 456",
+    );
+    const cachedSession = await sessionPrincipal(account.secret);
+    await logout(
+      new Request("http://localhost/api/auth/logout", {
+        headers: { cookie: `planroom_session=${account.secret}` },
+      }),
+    );
+    for (const identity of [tokenPrincipal, cachedSession]) {
+      await expect(createDocument(identity, content)).rejects.toMatchObject({
+        status: 401,
+        code: "UNAUTHENTICATED",
+      });
+      await expect(
+        updateDocument(identity, document.id, {
+          ...content,
+          expectedRevision: 1,
+        }),
+      ).rejects.toMatchObject({ status: 401, code: "UNAUTHENTICATED" });
+      await expect(
+        restoreDocument(identity, document.id, 1, {
+          expectedRevision: 1,
+          changeSummary: "Not authorized",
+        }),
+      ).rejects.toMatchObject({ status: 401, code: "UNAUTHENTICATED" });
+      await expect(
+        addComment(identity, document.id, { body: "Must not be saved" }),
+      ).rejects.toMatchObject({ status: 401, code: "UNAUTHENTICATED" });
+    }
+    expect(
+      (await db.query<{ count: string }>("SELECT count(*) FROM documents"))
+        .rows[0].count,
+    ).toBe(baseline);
+    expect(await listRevisions(principal, document.id)).toHaveLength(1);
+    expect(await listComments(principal, document.id)).toEqual([]);
+  });
+  it("uses the current role and scope when a write reaches its transaction", async () => {
+    const document = await createDocument(principal, content);
+    const key = await createToken(principal, {
+      name: "Changed privilege regression",
+      scope: "write",
+    });
+    const cached = await requirePrincipal(
+      new Request("http://localhost/api/mcp", {
+        headers: { authorization: `Bearer ${key.token}` },
+      }),
+      { tokenOnly: true },
+    );
+    await db.query("UPDATE api_tokens SET scope='read' WHERE id=$1", [
+      key.record.id,
+    ]);
+    await expect(
+      updateDocument(cached, document.id, { ...content, expectedRevision: 1 }),
+    ).rejects.toMatchObject({ status: 403, code: "FORBIDDEN" });
+    await db.query("UPDATE api_tokens SET scope='write' WHERE id=$1", [
+      key.record.id,
+    ]);
+    await db.query("UPDATE users SET role='viewer' WHERE id=$1", [
+      principal.user.id,
+    ]);
+    try {
+      await expect(
+        addComment(cached, document.id, {
+          body: "Old role must not authorize",
+        }),
+      ).rejects.toMatchObject({ status: 403, code: "FORBIDDEN" });
+    } finally {
+      await db.query("UPDATE users SET role='admin' WHERE id=$1", [
+        principal.user.id,
+      ]);
+    }
+    expect(await listRevisions(principal, document.id)).toHaveLength(1);
+    expect(await listComments(principal, document.id)).toEqual([]);
+    await deleteToken(principal, key.record.id);
+  });
+  it("orders token issuance before logout or rejects it after the session has ended", async () => {
+    const account = await login(
+      "real-admin@example.test",
+      "Changed long password 456",
+    );
+    const identity = await sessionPrincipal(account.secret);
+    const blocker = await db.connect();
+    let issued: ReturnType<typeof createToken> | undefined;
+    let loggedOut: ReturnType<typeof logout> | undefined;
+    let outcomes: Promise<PromiseSettledResult<unknown>[]> | undefined;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("LOCK TABLE api_tokens IN ACCESS EXCLUSIVE MODE");
+      issued = createToken(identity, {
+        name: "Logout race regression",
+        scope: "read",
+      });
+      await waitForBlockedQuery(
+        "INSERT INTO api_tokens(id,user_id,name,scope,secret_hash) VALUES($1,$2,$3,$4,$5) RETURNING *",
+      );
+      loggedOut = logout(
+        new Request("http://localhost/api/auth/logout", {
+          headers: { cookie: `planroom_session=${account.secret}` },
+        }),
+      );
+      outcomes = Promise.allSettled([issued, loggedOut]);
+      await waitForBlockedQuery("SELECT id FROM users WHERE id=$1 FOR UPDATE");
+      await blocker.query("COMMIT");
+      await outcomes;
+      const result = await issued;
+      expect(
+        await findPrincipal(
+          new Request("http://localhost/api", {
+            headers: { cookie: `planroom_session=${account.secret}` },
+          }),
+        ),
+      ).toBeNull();
+      await expect(
+        createToken(identity, { name: "After logout", scope: "read" }),
+      ).rejects.toMatchObject({ status: 401, code: "UNAUTHENTICATED" });
+      await deleteToken(principal, result.record.id);
+    } finally {
+      await blocker.query("ROLLBACK");
+      blocker.release();
+      if (outcomes) await outcomes;
+      else if (issued) await Promise.allSettled([issued]);
+    }
+  });
+  it("locks a real account for ten full minutes starting at its fifth failure, and resets after recovery", async () => {
+    const email = "lockout-policy@example.test";
+    const password = "Valid lockout password 123";
+    await createUser(principal, {
+      name: "Lockout regression",
+      email,
+      password,
+      role: "viewer",
+    });
+    for (let index = 0; index < 4; index++)
+      await expect(login(email, "Wrong password")).rejects.toMatchObject({
+        status: 401,
+      });
+    await db.query(
+      "UPDATE login_attempts SET window_start=now()-interval '9 minutes' WHERE subject_hash=$1",
+      [secretHash(email)],
+    );
+    await expect(login(email, "Wrong password")).rejects.toMatchObject({
+      status: 401,
+    });
+    const fifth = (
+      await db.query<{ attempts: number; recent: boolean }>(
+        "SELECT attempts, window_start>now()-interval '5 seconds' AS recent FROM login_attempts WHERE subject_hash=$1",
+        [secretHash(email)],
+      )
+    ).rows[0];
+    expect(fifth).toEqual({ attempts: 5, recent: true });
+    await expect(login(email, password)).rejects.toMatchObject({
+      status: 429,
+      code: "RATE_LIMITED",
+    });
+    await db.query(
+      "UPDATE login_attempts SET window_start=now()-interval '9 minutes 59 seconds' WHERE subject_hash=$1",
+      [secretHash(email)],
+    );
+    await expect(login(email, password)).rejects.toMatchObject({ status: 429 });
+    await db.query(
+      "UPDATE login_attempts SET window_start=now()-interval '10 minutes 1 second' WHERE subject_hash=$1",
+      [secretHash(email)],
+    );
+    expect((await login(email, password)).user.email).toBe(email);
+    expect(
+      (
+        await db.query(
+          "SELECT subject_hash FROM login_attempts WHERE subject_hash=$1",
+          [secretHash(email)],
+        )
+      ).rows,
+    ).toHaveLength(0);
+    await expect(login(email, "Wrong password")).rejects.toMatchObject({
+      status: 401,
+    });
+    expect(
+      (
+        await db.query<{ attempts: number }>(
+          "SELECT attempts FROM login_attempts WHERE subject_hash=$1",
+          [secretHash(email)],
+        )
+      ).rows[0].attempts,
+    ).toBe(1);
+    await login(email, password);
+  });
+  it("counts concurrent failures serially and stops verification after exactly five", async () => {
+    const email = "concurrent-lockout@example.test";
+    await expect(login(email, "Wrong password")).rejects.toMatchObject({
+      status: 401,
+    });
+    const failures = await Promise.allSettled(
+      Array.from({ length: 4 }, () => login(email, "Wrong password")),
+    );
+    for (const failure of failures) {
+      expect(failure.status).toBe("rejected");
+      if (failure.status === "rejected")
+        expect(failure.reason).toMatchObject({ status: 401 });
+    }
+    await expect(login(email, "Wrong password")).rejects.toMatchObject({
+      status: 429,
+    });
+    expect(
+      (
+        await db.query<{ attempts: number }>(
+          "SELECT attempts FROM login_attempts WHERE subject_hash=$1",
+          [secretHash(email)],
+        )
+      ).rows[0].attempts,
+    ).toBe(5);
+  });
+  it("expires API keys after ninety days and rejects a cached key from all document writes", async () => {
+    const key = await createToken(principal, {
+      name: "Expiry regression",
+      scope: "write",
+    });
+    const expiresAt = Date.parse(key.record.expiresAt);
+    expect(expiresAt - Date.parse(key.record.createdAt)).toBe(
+      90 * 24 * 60 * 60 * 1000,
+    );
+    const request = new Request("http://localhost/api", {
+      headers: { authorization: `Bearer ${key.token}` },
+    });
+    const cached = await requirePrincipal(request, { tokenOnly: true });
+    const document = await createDocument(principal, content);
+    const before = (await db.query("SELECT id FROM documents")).rows.length;
+    await db.query(
+      "UPDATE api_tokens SET expires_at=now()-interval '1 second' WHERE id=$1",
+      [key.record.id],
+    );
+    expect(await findPrincipal(request, true)).toBeNull();
+    const operations = [
+      () => createDocument(cached, content),
+      () =>
+        updateDocument(cached, document.id, {
+          ...content,
+          expectedRevision: 1,
+        }),
+      () =>
+        restoreDocument(cached, document.id, 1, {
+          expectedRevision: 1,
+          changeSummary: "Expired key restore",
+        }),
+      () => addComment(cached, document.id, { body: "Expired key comment" }),
+    ];
+    for (const operation of operations)
+      await expect(operation()).rejects.toMatchObject({
+        status: 401,
+        code: "UNAUTHENTICATED",
+      });
+    expect((await db.query("SELECT id FROM documents")).rows).toHaveLength(
+      before,
+    );
+    expect(await listRevisions(principal, document.id)).toHaveLength(1);
+    expect(await listComments(principal, document.id)).toEqual([]);
+    await deleteToken(principal, key.record.id);
+  });
+  it("backfills key lifetime without immediately revoking preexisting old keys", async () => {
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "CREATE TEMP TABLE api_tokens(created_at timestamptz NOT NULL)",
+      );
+      await client.query(
+        "INSERT INTO api_tokens(created_at) VALUES(now()-interval '120 days'),(now()-interval '1 day')",
+      );
+      await client.query(
+        await readFile(
+          resolve(process.cwd(), "migrations/002_token_expiry.sql"),
+          "utf8",
+        ),
+      );
+      const rows = (
+        await client.query<{ lifetime_days: string }>(
+          "SELECT extract(epoch from(expires_at-now()))/86400 AS lifetime_days FROM api_tokens ORDER BY created_at",
+        )
+      ).rows;
+      expect(Number(rows[0].lifetime_days)).toBe(90);
+      expect(Number(rows[1].lifetime_days)).toBe(89);
+      await client.query("INSERT INTO api_tokens(created_at) VALUES(now())");
+      expect(
+        (
+          await client.query<{ valid: boolean }>(
+            "SELECT expires_at=now()+interval '90 days' AS valid FROM api_tokens ORDER BY created_at DESC LIMIT 1",
+          )
+        ).rows[0].valid,
+      ).toBe(true);
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+  });
+  it("rejects excess concurrent logins without queueing expensive work", async () => {
+    const results = await Promise.allSettled(
+      Array.from({ length: 5 }, (_, index) =>
+        login(
+          `concurrent-security-${index}@example.test`,
+          "Not a valid password",
+        ),
+      ),
+    );
+    expect(
+      results.filter(
+        (result) =>
+          result.status === "rejected" &&
+          result.reason instanceof AppError &&
+          result.reason.code === "AUTH_BUSY",
+      ),
+    ).toHaveLength(1);
+    expect(
+      results.filter(
+        (result) =>
+          result.status === "rejected" &&
+          result.reason instanceof AppError &&
+          result.reason.code === "INVALID_CREDENTIALS",
+      ),
+    ).toHaveLength(4);
+    expect(
+      (await login("real-admin@example.test", "Changed long password 456")).user
+        .id,
+    ).toBe(principal.user.id);
+  });
+  it("denies a streamed MCP read if the real API key is revoked or expires while its body is being read", async () => {
+    const document = await createDocument(principal, content);
+    const endpoint = new URL(
+      "/api/mcp",
+      process.env.APP_URL ?? "http://localhost:3210",
+    );
+    for (const invalidation of ["revoke", "expire"] as const) {
+      const key = await createToken(principal, {
+        name: `Slow read ${invalidation}`,
+        scope: "read",
+      });
+      let markBodyReading: (() => void) | undefined;
+      const bodyReading = new Promise<void>((resolve) => {
+        markBodyReading = resolve;
+      });
+      let bodyController:
+        ReadableStreamDefaultController<Uint8Array> | undefined;
+      const stream = new ReadableStream<Uint8Array>(
+        {
+          start(controller) {
+            bodyController = controller;
+          },
+          pull() {
+            markBodyReading?.();
+          },
+        },
+        { highWaterMark: 0 },
+      );
+      const abort = new AbortController();
+      const init: RequestInit & { duplex: "half" } = {
+        method: "POST",
+        body: stream,
+        duplex: "half",
+        signal: abort.signal,
+        headers: {
+          authorization: `Bearer ${key.token}`,
+          host: endpoint.host,
+          "Content-Type": "application/json",
+          accept: "application/json, text/event-stream",
+        },
+      };
+      const pending = mcpPost(new Request(endpoint, init));
+      try {
+        await Promise.race([
+          bodyReading,
+          pending.then(() => {
+            throw new Error("MCP request returned before the body was read");
+          }),
+        ]);
+        if (invalidation === "revoke")
+          await deleteToken(principal, key.record.id);
+        else
+          await db.query(
+            "UPDATE api_tokens SET expires_at=now()-interval '1 second' WHERE id=$1",
+            [key.record.id],
+          );
+        if (!bodyController)
+          throw new Error("Expected pending MCP body controller");
+        bodyController.enqueue(
+          new TextEncoder().encode(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: 1,
+              method: "tools/call",
+              params: { name: "read_document", arguments: { id: document.id } },
+            }),
+          ),
+        );
+        bodyController.close();
+        const response = await pending;
+        expect(response.status).toBe(401);
+        expect(await response.json()).toEqual({
+          error: {
+            code: "UNAUTHENTICATED",
+            message: "Logga in för att fortsätta.",
+          },
+        });
+      } finally {
+        abort.abort();
+        await pending;
+        await deleteToken(principal, key.record.id);
+      }
+    }
+  });
+  it("bounds unique-email abuse globally without creating rows after the budget and recovers after its short window", async () => {
+    // This suite owns an isolated disposable database. Clear previous test
+    // counters so the public60/minute policy can be exercised in full.
+    await db.query("DELETE FROM login_attempts");
+    for (let index = 0; index < 60; index++)
+      await expect(
+        login(
+          `rotating-security-${index}@example.test`,
+          "Not a valid password",
+        ),
+      ).rejects.toMatchObject({ status: 401, code: "INVALID_CREDENTIALS" });
+    expect(
+      (await db.query("SELECT subject_hash FROM login_attempts")).rows,
+    ).toHaveLength(61);
+    for (let index = 60; index < 65; index++)
+      await expect(
+        login(
+          `rotating-security-${index}@example.test`,
+          "Not a valid password",
+        ),
+      ).rejects.toMatchObject({ status: 429, code: "RATE_LIMITED" });
+    expect(
+      (await db.query("SELECT subject_hash FROM login_attempts")).rows,
+    ).toHaveLength(61);
+    await db.query(
+      "UPDATE login_attempts SET window_start=now()-interval '61 seconds' WHERE subject_hash=$1",
+      [secretHash("login:global")],
+    );
+    expect(
+      (await login("real-admin@example.test", "Changed long password 456")).user
+        .id,
+    ).toBe(principal.user.id);
+  }, 30_000);
 });

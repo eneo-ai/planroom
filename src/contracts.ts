@@ -60,6 +60,7 @@ export const apiTokenSchema = z.object({
   name: z.string(),
   scope: tokenScopeSchema,
   createdAt: timestampSchema,
+  expiresAt: timestampSchema,
   lastUsedAt: timestampSchema.nullable(),
 });
 export const apiErrorBodySchema = z.object({

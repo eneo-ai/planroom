@@ -1,7 +1,19 @@
 {
   "name": "planroom",
   "version": "0.1.0",
+  "description": "A self-hosted workspace for versioned HTML plans, with REST and MCP APIs.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eneo-ai/planroom.git"
+  },
+  "bugs": {
+    "url": "https://github.com/eneo-ai/planroom/issues"
+  },
   "private": true,
+  "engines": {
+    "node": ">=22 <23"
+  },
   "scripts": {
     "dev": "next dev --hostname 0.0.0.0",
     "build": "next build",
@@ -43,6 +55,7 @@
     "vitest": "5.0.3"
   },
   "overrides": {
+    "@ai-sdk/provider-utils": "4.0.33",
     "undici": "7.30.0"
   }
 }

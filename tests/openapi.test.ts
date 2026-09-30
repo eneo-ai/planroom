@@ -191,6 +191,25 @@ describe("published REST API contracts", () => {
     ).toEqual({ $ref: "#/components/schemas/UnavailableResponse" });
     expect(operation("/api/auth/login", "post").responses["429"]).toBeDefined();
   });
+  it("exposes body deadlines, authentication budgets and key expiry in the public contract", () => {
+    for (const methods of Object.values(openApiDocument.paths)) {
+      for (const entry of Object.values(methods)) {
+        if (entry.requestBody) {
+          expect(
+            entry.responses["408"].content?.["application/json"].schema,
+          ).toEqual({ $ref: "#/components/schemas/ApiErrorBody" });
+        }
+      }
+    }
+    expect(operation("/api/auth/setup", "post").responses["429"]).toBeDefined();
+    expect(
+      operation("/api/admin/users", "post").responses["429"],
+    ).toBeDefined();
+    expect(openApiDocument.components.schemas.ApiToken.required).toContain(
+      "expiresAt",
+    );
+    expect(operation("/api/tokens", "post").description).toContain("90 days");
+  });
   it("publishes same-origin discovery/specification without requiring identity or reflecting the request host", async () => {
     const response = discovery();
     expect(response.status).toBe(200);

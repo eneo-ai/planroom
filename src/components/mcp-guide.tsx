@@ -25,6 +25,12 @@ export function McpGuide() {
           ansluter genom den medföljande lokala bryggan.
         </p>
       </header>
+      <p className="fine-print">
+        Använd en egen nyckel per klient. Nycklar gäller i 90 dagar och förnyas
+        manuellt: skapa en ny i Inställningar, ersätt den i klientens
+        konfiguration eller miljövariabel och starta om klienten. Kontrollera
+        anslutningen innan du återkallar den gamla.
+      </p>
       <p>
         Vill du använda REST-API:t direkt?{" "}
         <Link href="/api/docs">Öppna den interaktiva API-dokumentationen</Link>{" "}

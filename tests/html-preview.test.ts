@@ -83,9 +83,9 @@ describe("HTML preview isolation", () => {
     expect(restrictions).toContain("connect-src 'none'");
     expect(restrictions).toContain("form-action 'none'");
   });
-  it("retains the real planning example and SVG diagrams without converting the source", () => {
+  it("retains the public synthetic planning example and its SVG diagram without converting the source", () => {
     const source = readFileSync(
-      new URL("../examples/orchestrator.html", import.meta.url),
+      new URL("../examples/planning-demo.html", import.meta.url),
       "utf8",
     );
     const preview = htmlPreview(source);
@@ -93,6 +93,6 @@ describe("HTML preview isolation", () => {
     expect(elements(parse(preview), "svg")).toHaveLength(
       elements(parse(source), "svg").length,
     );
-    expect(elements(parse(preview), "svg").length).toBeGreaterThan(4);
+    expect(elements(parse(preview), "svg").length).toBeGreaterThan(0);
   });
 });
