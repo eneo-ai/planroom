@@ -167,6 +167,19 @@ export function ApiTokens() {
               <KeyRound size={19} aria-hidden />
               <div>
                 <strong>{token.name}</strong>
+                <p>
+                  {token.maskedToken ? (
+                    <code
+                      aria-label={`Nyckel som slutar på ${token.maskedToken.slice(-4)}`}
+                    >
+                      {token.maskedToken}
+                    </code>
+                  ) : (
+                    <span className="muted">
+                      Äldre nyckel · identifierare saknas
+                    </span>
+                  )}
+                </p>
                 <p className="muted">
                   {Date.parse(token.expiresAt) <= Date.now()
                     ? "Utgången sedan "
@@ -274,6 +287,12 @@ export function ApiTokens() {
           <p>
             Klienter som använder <strong>{revoke?.name}</strong> förlorar sin
             åtkomst direkt. Du kan skapa en ny nyckel senare.
+            {revoke?.maskedToken && (
+              <>
+                {" "}
+                Nyckel: <code>{revoke.maskedToken}</code>.
+              </>
+            )}
           </p>
           {error && (
             <Banner

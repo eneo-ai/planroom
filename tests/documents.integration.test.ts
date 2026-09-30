@@ -8,6 +8,7 @@ import { migrate } from "../src/server/migrate";
 import { seedBootstrap } from "../src/server/bootstrap";
 import {
   createToken,
+  listTokens,
   createUser,
   deleteToken,
   findPrincipal,
@@ -25,6 +26,9 @@ import {
   listRevisions,
   restoreDocument,
   updateDocument,
+  updateDocumentStatus,
+  updateDocumentGitHubLinks,
+  listDocuments,
   addComment,
   listComments,
 } from "../src/server/documents";
@@ -325,6 +329,201 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
       content.html,
     );
     expect(await listRevisions(principal, original.id)).toHaveLength(3);
+  });
+  it.each(["ready", "in_development", "completed", "archived"] as const)(
+    "freezes content in %s, retains discussion/references, and requires explicit reopening",
+    async (status) => {
+      const original = await createDocument(principal, content);
+      const frozen = await updateDocumentStatus(principal, original.id, {
+        status,
+        expectedRevision: 1,
+      });
+      expect(frozen).toMatchObject({
+        status,
+        currentRevision: 2,
+        html: content.html,
+        instructions: content.instructions,
+      });
+      // A full replacement cannot sneak a status change in to bypass the lock.
+      await expect(
+        updateDocument(principal, original.id, {
+          ...content,
+          status: "draft",
+          html: "<p>Must not overwrite the handoff</p>",
+          expectedRevision: 2,
+        }),
+      ).rejects.toMatchObject({ code: "DOCUMENT_LOCKED", currentRevision: 2 });
+      await expect(
+        restoreDocument(principal, original.id, 1, {
+          expectedRevision: 2,
+          changeSummary: "Must not bypass freeze",
+        }),
+      ).rejects.toMatchObject({ code: "DOCUMENT_LOCKED" });
+      expect(await listRevisions(principal, original.id)).toHaveLength(2);
+      const discussion = await addComment(principal, original.id, {
+        body: "Implementation discussion remains available",
+      });
+      expect(await listComments(principal, original.id)).toContainEqual(
+        discussion,
+      );
+      const githubLinks = ["https://github.com/eneo-ai/planroom/pull/12"];
+      const linked = await updateDocumentGitHubLinks(principal, original.id, {
+        githubLinks,
+        expectedRevision: 2,
+      });
+      expect(linked).toMatchObject({
+        status,
+        html: original.html,
+        instructions: original.instructions,
+        githubLinks,
+        currentRevision: 3,
+      });
+      expect(
+        (await listDocuments(principal, { status })).find(
+          (item) => item.id === original.id,
+        )?.githubLinks,
+      ).toEqual(githubLinks);
+      const reopened = await updateDocumentStatus(principal, original.id, {
+        status: "active",
+        expectedRevision: 3,
+      });
+      expect(reopened).toMatchObject({
+        currentRevision: 4,
+        html: original.html,
+        githubLinks,
+      });
+      const edited = await updateDocument(principal, original.id, {
+        ...content,
+        status: "active",
+        html: "<p>New scope after explicit reopening</p>",
+        expectedRevision: 4,
+      });
+      expect(edited).toMatchObject({ currentRevision: 5, githubLinks });
+      expect((await getRevision(principal, original.id, 2)).html).toBe(
+        original.html,
+      );
+    },
+  );
+  it("makes status/reference races conflict rather than overwriting content or metadata", async () => {
+    const original = await createDocument(principal, content);
+    const results = await Promise.allSettled([
+      updateDocumentStatus(principal, original.id, {
+        status: "ready",
+        expectedRevision: 1,
+      }),
+      updateDocumentGitHubLinks(principal, original.id, {
+        githubLinks: ["https://github.com/eneo-ai/planroom/issues/99"],
+        expectedRevision: 1,
+      }),
+    ]);
+    expect(
+      results.filter((result) => result.status === "fulfilled"),
+    ).toHaveLength(1);
+    const rejected = results.find((result) => result.status === "rejected");
+    if (!rejected || rejected.status !== "rejected")
+      throw new Error("Expected revision conflict");
+    expect(rejected.reason).toMatchObject({
+      code: "REVISION_CONFLICT",
+      currentRevision: 2,
+    });
+    expect(await getDocument(principal, original.id)).toMatchObject({
+      currentRevision: 2,
+      html: content.html,
+      title: content.title,
+      instructions: content.instructions,
+    });
+    expect(await listRevisions(principal, original.id)).toHaveLength(2);
+  });
+  it("restores historical GitHub references and preserves them across ordinary content writes", async () => {
+    const original = await createDocument(principal, content);
+    const githubLinks = ["https://github.com/eneo-ai/planroom/issues/7"];
+    await updateDocumentGitHubLinks(principal, original.id, {
+      githubLinks,
+      expectedRevision: 1,
+    });
+    await updateDocument(principal, original.id, {
+      ...content,
+      html: "<p>Updated plan</p>",
+      expectedRevision: 2,
+    });
+    expect((await getDocument(principal, original.id)).githubLinks).toEqual(
+      githubLinks,
+    );
+    await updateDocumentGitHubLinks(principal, original.id, {
+      githubLinks: [],
+      expectedRevision: 3,
+    });
+    const restored = await restoreDocument(principal, original.id, 2, {
+      expectedRevision: 4,
+      changeSummary: "Restore the linked plan",
+    });
+    expect(restored).toMatchObject({
+      currentRevision: 5,
+      html: original.html,
+      githubLinks,
+    });
+    expect((await getRevision(principal, original.id, 1)).githubLinks).toEqual(
+      [],
+    );
+    expect((await getRevision(principal, original.id, 2)).githubLinks).toEqual(
+      githubLinks,
+    );
+  });
+  it("enforces read scope and viewer permissions for both metadata operations", async () => {
+    const original = await createDocument(principal, content);
+    for (const identity of [
+      { ...principal, scope: "read" as const },
+      { ...principal, user: { ...principal.user, role: "viewer" as const } },
+    ]) {
+      await expect(
+        updateDocumentStatus(identity, original.id, {
+          status: "ready",
+          expectedRevision: 1,
+        }),
+      ).rejects.toMatchObject({ status: 403 });
+      await expect(
+        updateDocumentGitHubLinks(identity, original.id, {
+          githubLinks: [],
+          expectedRevision: 1,
+        }),
+      ).rejects.toMatchObject({ status: 403 });
+    }
+    expect((await getDocument(principal, original.id)).currentRevision).toBe(1);
+  });
+  it("persists just the last four key characters and never lists the complete secret", async () => {
+    const created = await createToken(principal, {
+      name: "Suffix identification",
+      scope: "read",
+    });
+    expect(created.record.maskedToken).toBe(
+      `********${created.token.slice(-4)}`,
+    );
+    const stored = await db.query<{
+      secret_hash: string;
+      token_suffix: string;
+    }>("SELECT secret_hash,token_suffix FROM api_tokens WHERE id=$1", [
+      created.record.id,
+    ]);
+    expect(stored.rows[0]).toEqual({
+      secret_hash: secretHash(created.token),
+      token_suffix: created.token.slice(-4),
+    });
+    const listed = await listTokens(principal);
+    expect(listed.find((token) => token.id === created.record.id)).toEqual(
+      created.record,
+    );
+    expect(JSON.stringify(listed)).not.toContain(created.token);
+    expect(JSON.stringify(listed)).not.toContain(secretHash(created.token));
+    // Migrated historical keys have no suffix: hashes cannot reconstruct it.
+    await db.query("UPDATE api_tokens SET token_suffix=NULL WHERE id=$1", [
+      created.record.id,
+    ]);
+    expect(
+      (await listTokens(principal)).find(
+        (token) => token.id === created.record.id,
+      )?.maskedToken,
+    ).toBeNull();
+    await deleteToken(principal, created.record.id);
   });
   it("enforces token scope and inherited user role and never accepts cookies at MCP", async () => {
     const record = await createToken(principal, {
@@ -813,7 +1012,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
         scope: "read",
       });
       await waitForBlockedQuery(
-        "INSERT INTO api_tokens(id,user_id,name,scope,secret_hash) VALUES($1,$2,$3,$4,$5) RETURNING *",
+        "INSERT INTO api_tokens(id,user_id,name,scope,secret_hash,token_suffix) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,name,scope,created_at,last_used_at,expires_at,token_suffix",
       );
       loggedOut = logout(
         new Request("http://localhost/api/auth/logout", {

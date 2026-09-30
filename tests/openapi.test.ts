@@ -71,7 +71,14 @@ describe("published REST API contracts", () => {
       "changeSummary",
     ]);
     expect(schemas.DocumentContent.properties?.status).toMatchObject({
-      enum: ["draft", "active", "completed", "archived"],
+      enum: [
+        "draft",
+        "active",
+        "ready",
+        "in_development",
+        "completed",
+        "archived",
+      ],
       default: "draft",
     });
     expect(schemas.DocumentUpdate.required).toContain("expectedRevision");
@@ -80,6 +87,23 @@ describe("published REST API contracts", () => {
       exclusiveMinimum: 0,
       maximum: 2147483647,
     });
+    expect(schemas.DocumentStatusUpdate.required).toEqual([
+      "expectedRevision",
+      "status",
+    ]);
+    expect(schemas.DocumentGitHubLinksUpdate.required).toEqual([
+      "expectedRevision",
+      "githubLinks",
+    ]);
+    expect(
+      schemas.DocumentGitHubLinksUpdate.properties?.githubLinks,
+    ).toMatchObject({ type: "array", maxItems: 20 });
+    expect(
+      operation("/api/documents/{id}/status", "put").responses["409"],
+    ).toBeDefined();
+    expect(
+      operation("/api/documents/{id}/github-links", "put").security,
+    ).toEqual([{ sessionCookie: [] }, { bearerAuth: [] }]);
     expect(schemas.CreateTokenRequest.properties?.scope).toMatchObject({
       enum: ["read", "write"],
     });
@@ -100,6 +124,7 @@ describe("published REST API contracts", () => {
       title: "Plan",
       description: "",
       status: "draft",
+      githubLinks: [],
       currentRevision: 1,
       authorName: user.name,
       createdAt: "2026-09-30T10:00:00.000Z",

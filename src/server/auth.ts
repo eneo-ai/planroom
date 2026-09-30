@@ -25,6 +25,7 @@ interface TokenRow {
   created_at: Date;
   last_used_at: Date | null;
   expires_at: Date;
+  token_suffix: string | null;
 }
 export const SESSION_COOKIE = "planroom_session";
 const LOGIN_CONCURRENCY_LIMIT = 4;
@@ -64,6 +65,8 @@ function tokenFromRow(row: TokenRow): ApiToken {
     createdAt: row.created_at.toISOString(),
     expiresAt: row.expires_at.toISOString(),
     lastUsedAt: row.last_used_at?.toISOString() ?? null,
+    maskedToken:
+      row.token_suffix === null ? null : `********${row.token_suffix}`,
   };
 }
 function cookieSecret(request: Request): string | null {
@@ -416,7 +419,7 @@ export async function replaceAccount(
 export async function listTokens(principal: Principal): Promise<ApiToken[]> {
   assertReady(principal);
   const result = await db.query<TokenRow>(
-    "SELECT * FROM api_tokens WHERE user_id=$1 ORDER BY created_at DESC",
+    "SELECT id,name,scope,created_at,last_used_at,expires_at,token_suffix FROM api_tokens WHERE user_id=$1 ORDER BY created_at DESC",
     [principal.user.id],
   );
   return result.rows.map(tokenFromRow);
@@ -440,8 +443,15 @@ export async function createToken(
     assertReady(current);
     if (input.scope === "write") assertWrite(current);
     const result = await client.query<TokenRow>(
-      "INSERT INTO api_tokens(id,user_id,name,scope,secret_hash) VALUES($1,$2,$3,$4,$5) RETURNING *",
-      [randomUUID(), row.id, input.name, input.scope, secretHash(token)],
+      "INSERT INTO api_tokens(id,user_id,name,scope,secret_hash,token_suffix) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,name,scope,created_at,last_used_at,expires_at,token_suffix",
+      [
+        randomUUID(),
+        row.id,
+        input.name,
+        input.scope,
+        secretHash(token),
+        token.slice(-4),
+      ],
     );
     return { token, record: tokenFromRow(result.rows[0]) };
   });

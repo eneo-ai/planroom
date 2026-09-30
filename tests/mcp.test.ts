@@ -55,11 +55,14 @@ describe("MCP permissions through the official SDK", () => {
         "read_revision",
         "read_comments",
       ]);
-      const result = await session.client.callTool({
-        name: "update_document",
-        arguments: {},
-      });
-      expect(result.isError).toBe(true);
+      for (const name of [
+        "update_document",
+        "update_document_status",
+        "update_document_github_links",
+      ]) {
+        const result = await session.client.callTool({ name, arguments: {} });
+        expect(result.isError).toBe(true);
+      }
     } finally {
       await session.close();
     }
@@ -95,6 +98,46 @@ describe("MCP permissions through the official SDK", () => {
         },
       });
       expect(result.isError).toBe(true);
+    } finally {
+      await session.close();
+    }
+  });
+  it("advertises dedicated metadata tools and validates their preconditions through the SDK", async () => {
+    const session = await connect({ ...principal, scope: "write" });
+    try {
+      const listing = await session.client.listTools();
+      for (const name of [
+        "update_document_status",
+        "update_document_github_links",
+      ]) {
+        const tool = listing.tools.find((tool) => tool.name === name);
+        expect(tool?.inputSchema.required).toContain("expectedRevision");
+        expect(tool?.annotations?.readOnlyHint).toBe(false);
+        expect(
+          (
+            await session.client.callTool({
+              name,
+              arguments: {
+                id: principal.user.id,
+                status: "ready",
+                githubLinks: [],
+              },
+            })
+          ).isError,
+        ).toBe(true);
+      }
+      expect(
+        (
+          await session.client.callTool({
+            name: "update_document_github_links",
+            arguments: {
+              id: principal.user.id,
+              expectedRevision: 1,
+              githubLinks: ["javascript:alert(1)"],
+            },
+          })
+        ).isError,
+      ).toBe(true);
     } finally {
       await session.close();
     }

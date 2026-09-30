@@ -198,6 +198,39 @@ select {
   color: var(--color-text-secondary);
   font-size: 0.78rem;
 }
+.github-references {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+.github-link-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.github-link-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-block: 12px;
+}
+.github-link-form {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.github-link-form > :first-child {
+  flex: 1 1 300px;
+}
+.github-link-form > p {
+  flex-basis: 100%;
+}
 .clamp-3 {
   display: -webkit-box;
   -webkit-box-orient: vertical;

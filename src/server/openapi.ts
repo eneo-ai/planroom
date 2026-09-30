@@ -27,6 +27,8 @@ import {
   tokensResponseSchema,
   unavailableResponseSchema,
   updateDocumentSchema,
+  updateDocumentStatusSchema,
+  updateDocumentGitHubLinksSchema,
   userResponseSchema,
   userSchema,
   usersResponseSchema,
@@ -103,6 +105,8 @@ const requestSchemas = {
   CreateUserRequest: createUserSchema,
   DocumentContent: documentContentSchema,
   DocumentUpdate: updateDocumentSchema,
+  DocumentStatusUpdate: updateDocumentStatusSchema,
+  DocumentGitHubLinksUpdate: updateDocumentGitHubLinksSchema,
   RestoreRequest: restoreSchema,
   CommentRequest: commentSchema,
   CreateTokenRequest: createTokenSchema,
@@ -160,7 +164,7 @@ const errorDescriptions: Record<number, string> = {
   403: "FORBIDDEN, ACCOUNT_SETUP_REQUIRED, SESSION_REQUIRED or INVALID_ORIGIN. Complete account setup, use the required role/scope, or send a same-origin session request.",
   404: "NOT_FOUND. The document or historical revision does not exist.",
   408: "BODY_TIMEOUT. The JSON request body was not received within 30 seconds; submit a complete request.",
-  409: "REVISION_CONFLICT includes error.currentRevision: fetch the latest document and reconcile changes before resubmitting. Account/user creation can instead return EMAIL_IN_USE.",
+  409: "REVISION_CONFLICT includes error.currentRevision: fetch the latest document and reconcile changes before resubmitting. DOCUMENT_LOCKED: explicitly reopen the plan to draft or active via the status endpoint before editing/restoring its content. Account/user creation can instead return EMAIL_IN_USE.",
   413: "BODY_TOO_LARGE. JSON request bodies are limited to 3 MiB before parsing, including UTF-8 HTML and escaping overhead.",
   415: "UNSUPPORTED_MEDIA_TYPE. JSON mutations require Content-Type: application/json.",
   429: "RATE_LIMITED or AUTH_BUSY. Five failed logins lock the account for ten minutes. Login admission also permits at most four concurrent requests and 60 attempts per minute across the installation. Password work permits four concurrent operations without queuing; retry later when busy.",
@@ -470,7 +474,7 @@ export const openApiDocument: OpenApiDocument = {
         operationId: "updateDocument",
         summary: "Save a new immutable revision",
         description:
-          "Full replacement of title, description, HTML, instructions and status. Include the currentRevision you actually read as expectedRevision; stale writes are rejected atomically with HTTP 409 and error.currentRevision. Fetch/reconcile before retrying; never blindly substitute a newer number." +
+          "Full replacement of title, description, HTML, instructions and status; GitHub references are preserved. The current plan must be draft or active (planning). ready, in_development, completed and archived reject all content writes with DOCUMENT_LOCKED, including attempts to reopen through this operation. Use the separate status endpoint to reopen first. Include the currentRevision you actually read as expectedRevision; stale writes are rejected atomically with HTTP 409 and error.currentRevision. Fetch/reconcile before retrying; never blindly substitute a newer number." +
           ready +
           writes,
         tags: ["Documents"],
@@ -479,6 +483,48 @@ export const openApiDocument: OpenApiDocument = {
         requestBody: body("DocumentUpdate"),
         responses: {
           "200": jsonResponse("New current revision.", "DocumentDetail"),
+          ...errors(400, 401, 403, 404, 408, 409, 413, 415, 500, 503),
+        },
+      },
+    },
+    "/api/documents/{id}/status": {
+      put: {
+        operationId: "updateDocumentStatus",
+        summary: "Change status without editing content",
+        description:
+          "Creates an immutable revision with the new status, preserving title, description, HTML, instructions and GitHub references. draft and active permit editing; ready, in_development, completed and archived freeze content. Change back to draft or active to explicitly reopen. expectedRevision protects against concurrent writes." +
+          ready +
+          writes,
+        tags: ["Documents"],
+        security: security.document,
+        parameters: [id, optionalOrigin],
+        requestBody: body("DocumentStatusUpdate"),
+        responses: {
+          "200": jsonResponse(
+            "New current revision with updated status.",
+            "DocumentDetail",
+          ),
+          ...errors(400, 401, 403, 404, 408, 409, 413, 415, 500, 503),
+        },
+      },
+    },
+    "/api/documents/{id}/github-links": {
+      put: {
+        operationId: "updateDocumentGitHubLinks",
+        summary: "Link GitHub issues and pull requests",
+        description:
+          "Replaces GitHub references with up to 20 unique HTTPS github.com issue or pull-request URLs; query strings and comment anchors are removed. Read the current list first and include references to retain. Preserves all planning content and status, creates a revision and is available on locked plans. Does not contact or modify GitHub. expectedRevision protects against concurrent writes." +
+          ready +
+          writes,
+        tags: ["Documents"],
+        security: security.document,
+        parameters: [id, optionalOrigin],
+        requestBody: body("DocumentGitHubLinksUpdate"),
+        responses: {
+          "200": jsonResponse(
+            "New current revision with updated GitHub references.",
+            "DocumentDetail",
+          ),
           ...errors(400, 401, 403, 404, 408, 409, 413, 415, 500, 503),
         },
       },
@@ -523,7 +569,7 @@ export const openApiDocument: OpenApiDocument = {
         operationId: "restoreRevision",
         summary: "Restore history as a new current revision",
         description:
-          "Copies the selected historical content into a new revision. Existing history remains intact. expectedRevision protects the current document from concurrent overwrites; 409 includes error.currentRevision." +
+          "Copies the selected historical content, status and GitHub references into a new revision. Existing history remains intact. The current plan must be draft or active; otherwise DOCUMENT_LOCKED requires explicitly reopening through the status endpoint first. expectedRevision protects the current document from concurrent overwrites; 409 includes error.currentRevision." +
           ready +
           writes,
         tags: ["History"],
@@ -602,7 +648,7 @@ export const openApiDocument: OpenApiDocument = {
         operationId: "listApiKeys",
         summary: "List your personal API keys",
         description:
-          "Accepts a session or bearer key. Lists metadata only for the authenticated user's keys; secrets cannot be retrieved." +
+          "Accepts a session or bearer key. Lists metadata only for the authenticated user's keys, including maskedToken with the last four secret characters. Existing keys created before suffix storage return maskedToken:null. Complete secrets cannot be retrieved." +
           ready,
         tags: ["API keys"],
         security: security.document,
@@ -615,7 +661,7 @@ export const openApiDocument: OpenApiDocument = {
         operationId: "createApiKey",
         summary: "Create a scoped personal API key",
         description:
-          "Requires an active browser session and same-origin Origin. Viewers can create read keys; admin/editor users can create read or write keys. Keys expire 90 days after creation; expiresAt is included in the metadata. Create a replacement before expiry and update your client. The secret appears only in this response; keep it outside source control. Keys inherit the user's current role on every request, and document writes revalidate credentials inside their transaction." +
+          "Requires an active browser session and same-origin Origin. Viewers can create read keys; admin/editor users can create read or write keys. Keys expire 90 days after creation; expiresAt and maskedToken (eight asterisks plus the last four secret characters) are included in record. Create a replacement before expiry and update your client. The complete secret appears only in this response; keep it outside source control. Keys inherit the user's current role on every request, and document writes revalidate credentials inside their transaction." +
           ready,
         tags: ["API keys"],
         security: security.session,

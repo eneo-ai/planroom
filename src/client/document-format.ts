@@ -1,11 +1,6 @@
-import type { DocumentStatus, Role } from "@/contracts";
+import { documentStatusLabels, type Role } from "@/contracts";
 
-export const statuses: Record<DocumentStatus, string> = {
-  draft: "Utkast",
-  active: "Pågående",
-  completed: "Klart",
-  archived: "Arkiverat",
-};
+export const statuses = documentStatusLabels;
 export const statusOptions = Object.entries(statuses).map(([value, label]) => ({
   value,
   label,

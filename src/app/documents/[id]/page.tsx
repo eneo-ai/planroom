@@ -17,15 +17,25 @@ import {
   Bot,
   MessageSquare,
   History,
+  LockKeyhole,
+  Github,
 } from "lucide-react";
 import {
   documentContentSchema,
+  canEditDocumentContent,
   type DocumentContent,
   type DocumentDetail,
 } from "@/contracts";
 import { api, ApiError, errorMessage } from "@/client/api";
 import { formatDate } from "@/client/document-format";
-import { DocumentStatusBadge } from "@/components/document-status";
+import {
+  DocumentStatusBadge,
+  DocumentStatusControl,
+} from "@/components/document-status";
+import {
+  DocumentGitHubLinks,
+  GitHubReferences,
+} from "@/components/document-github-links";
 import { DocumentFields, HtmlImport } from "@/components/document-fields";
 import { HtmlViewer } from "@/components/html-viewer";
 import { DocumentComments } from "@/components/document-comments";
@@ -50,8 +60,10 @@ function editable(document: DocumentDetail): DocumentContent {
 export default function DocumentPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useSession();
-  const canEdit = user?.role !== "viewer";
+  const canWrite = user?.role === "admin" || user?.role === "editor";
   const [document, setDocument] = useState<DocumentDetail | null>(null);
+  const canEdit =
+    canWrite && document !== null && canEditDocumentContent(document.status);
   const [draft, setDraft] = useDocumentDraft(id);
   const buffer = draft?.content ?? null;
   const [tab, setTab] = useState("preview");
@@ -135,7 +147,15 @@ export default function DocumentPage() {
   }
   async function save(event: FormEvent) {
     event.preventDefault();
-    if (!document || !buffer || document.id !== id || busy || importing) return;
+    if (
+      !canEdit ||
+      !document ||
+      !buffer ||
+      document.id !== id ||
+      busy ||
+      importing
+    )
+      return;
     setError("");
     setNotice("");
     const parsed = documentContentSchema.safeParse(buffer);
@@ -159,9 +179,13 @@ export default function DocumentPage() {
       accept(next);
       setNotice(`Version ${next.currentRevision} har sparats.`);
     } catch (cause) {
-      if (cause instanceof ApiError && cause.status === 409)
+      if (cause instanceof ApiError && cause.code === "REVISION_CONFLICT")
         setConflict(cause.currentRevision ?? document.currentRevision + 1);
-      else setError(errorMessage(cause));
+      else {
+        if (cause instanceof ApiError && cause.code === "DOCUMENT_LOCKED")
+          await load(undefined, true);
+        setError(errorMessage(cause));
+      }
     } finally {
       setBusy(false);
     }
@@ -184,6 +208,19 @@ export default function DocumentPage() {
       current.includes(value) ? current : [...current, value],
     );
   }
+  function metadataError(cause: unknown) {
+    if (cause instanceof ApiError && cause.code === "REVISION_CONFLICT")
+      setConflict(
+        cause.currentRevision ?? (document?.currentRevision ?? 0) + 1,
+      );
+    setError(errorMessage(cause));
+  }
+  function metadataUpdated(next: DocumentDetail) {
+    accept(next);
+    if (tab === "edit" && !canEditDocumentContent(next.status))
+      setTab("preview");
+    setNotice(`Version ${next.currentRevision} har sparats.`);
+  }
   if (loading && (!document || document.id !== id))
     return (
       <div role="status" className="loading-state">
@@ -199,10 +236,21 @@ export default function DocumentPage() {
         endContent={<Button label="Försök igen" onClick={() => void load()} />}
       />
     );
+  const showEditor = canWrite && (canEdit || dirty);
+  const activeTab = tab === "edit" && !showEditor ? "preview" : tab;
   const tabs = [
     { value: "preview", label: "Planering", icon: Eye },
-    ...(canEdit ? [{ value: "edit", label: "Redigera", icon: Code2 }] : []),
+    ...(showEditor
+      ? [
+          {
+            value: "edit",
+            label: canEdit ? "Redigera" : "Osparat utkast",
+            icon: Code2,
+          },
+        ]
+      : []),
     { value: "instructions", label: "AI-instruktioner", icon: Bot },
+    { value: "github", label: "GitHub", icon: Github },
     { value: "comments", label: "Diskussion", icon: MessageSquare },
     { value: "history", label: "Historik", icon: History },
   ];
@@ -215,7 +263,24 @@ export default function DocumentPage() {
         <div>
           <div className="button-row">
             <p className="eyebrow">GEMENSAM PLANERING</p>
-            <DocumentStatusBadge status={document.status} />
+            {canWrite ? (
+              <DocumentStatusControl
+                document={document}
+                isDisabled={dirty || busy || importing || conflict !== null}
+                disabledMessage={
+                  dirty
+                    ? "Spara eller förkasta osparade ändringar innan du byter status."
+                    : conflict !== null
+                      ? "Ladda om den aktuella versionen innan du byter status."
+                      : undefined
+                }
+                onUpdated={metadataUpdated}
+                onError={metadataError}
+                onSavingChange={setBusy}
+              />
+            ) : (
+              <DocumentStatusBadge status={document.status} />
+            )}
           </div>
           <h1>{document.title}</h1>
           <p className="muted">{document.description}</p>
@@ -223,8 +288,16 @@ export default function DocumentPage() {
             Version {document.currentRevision} · Uppdaterad{" "}
             {formatDate(document.updatedAt)} av {document.authorName}
           </p>
+          <GitHubReferences links={document.githubLinks} />
         </div>
         <div className="button-row">
+          {canWrite && (
+            <Button
+              label="Koppla GitHub"
+              icon={<Github size={16} aria-hidden />}
+              onClick={() => changeTab("github")}
+            />
+          )}
           <Button
             label="Kopiera länk"
             icon={<Link2 size={16} aria-hidden />}
@@ -235,6 +308,14 @@ export default function DocumentPage() {
           </Link>
         </div>
       </header>
+      {!canEditDocumentContent(document.status) && (
+        <Banner
+          status="info"
+          title="Planen är låst för innehållsändringar"
+          icon={<LockKeyhole size={18} aria-hidden />}
+          description="HTML, titel, beskrivning och AI-instruktioner är låsta. Byt status till Utkast eller Aktiv planering för att lägga till mer. Diskussion och GitHub-kopplingar är fortfarande tillgängliga."
+        />
+      )}
       {error && (
         <Banner
           status="error"
@@ -274,7 +355,7 @@ export default function DocumentPage() {
         </div>
       )}
       <TabList
-        value={tab}
+        value={activeTab}
         onChange={changeTab}
         role="tablist"
         aria-label="Planeringens vyer"
@@ -293,7 +374,7 @@ export default function DocumentPage() {
         ))}
       </TabList>
       <section
-        hidden={tab !== "preview"}
+        hidden={activeTab !== "preview"}
         role="tabpanel"
         id="panel-preview"
         aria-labelledby="tab-preview"
@@ -304,33 +385,44 @@ export default function DocumentPage() {
           title={document.title}
         />
       </section>
-      {canEdit && (
+      {showEditor && (
         <section
-          hidden={tab !== "edit"}
+          hidden={activeTab !== "edit"}
           role="tabpanel"
           id="panel-edit"
           aria-labelledby="tab-edit"
         >
           <form onSubmit={save} className="page-stack">
-            <HtmlImport
-              isDisabled={busy}
-              onReadingChange={setImporting}
-              onImport={(html) =>
-                setDraft((current) =>
-                  current
-                    ? {
-                        ...current,
-                        content: { ...current.content, html },
-                        modified: true,
-                      }
-                    : undefined,
-                )
-              }
-            />
+            {!canEdit && (
+              <Banner
+                status="warning"
+                title="Ditt lokala utkast finns kvar"
+                description="Planen har låsts i en annan session. Kopiera dina ändringar innan du förkastar utkastet. Innehållet kan sparas först efter att planen har öppnats igen."
+              />
+            )}
+            {canEdit && (
+              <HtmlImport
+                isDisabled={busy}
+                onReadingChange={setImporting}
+                onImport={(html) =>
+                  setDraft((current) =>
+                    current
+                      ? {
+                          ...current,
+                          content: { ...current.content, html },
+                          modified: true,
+                        }
+                      : undefined,
+                  )
+                }
+              />
+            )}
             <DocumentFields
               value={buffer}
               onChange={setBuffer}
               isDisabled={busy}
+              isReadOnly={!canEdit}
+              showStatus={false}
             />
             <div className="form-actions">
               <p className="muted">
@@ -343,7 +435,9 @@ export default function DocumentPage() {
                 type="submit"
                 variant="primary"
                 isLoading={busy}
-                isDisabled={!dirty || conflict !== null || importing}
+                isDisabled={
+                  !canEdit || !dirty || conflict !== null || importing
+                }
                 icon={<Save size={16} aria-hidden />}
               />
             </div>
@@ -356,7 +450,7 @@ export default function DocumentPage() {
         </section>
       )}
       <section
-        hidden={tab !== "instructions"}
+        hidden={activeTab !== "instructions"}
         role="tabpanel"
         id="panel-instructions"
         aria-labelledby="tab-instructions"
@@ -386,17 +480,33 @@ export default function DocumentPage() {
         </p>
       </section>
       <section
-        hidden={tab !== "comments"}
+        hidden={activeTab !== "github"}
+        role="tabpanel"
+        id="panel-github"
+        aria-labelledby="tab-github"
+        className="narrow-content"
+      >
+        <DocumentGitHubLinks
+          document={document}
+          canWrite={canWrite}
+          isDisabled={dirty || busy || importing || conflict !== null}
+          onUpdated={metadataUpdated}
+          onError={metadataError}
+          onSavingChange={setBusy}
+        />
+      </section>
+      <section
+        hidden={activeTab !== "comments"}
         role="tabpanel"
         id="panel-comments"
         aria-labelledby="tab-comments"
       >
         {loadedTabs.includes("comments") && (
-          <DocumentComments documentId={id} canComment={canEdit} />
+          <DocumentComments documentId={id} canComment={canWrite} />
         )}
       </section>
       <section
-        hidden={tab !== "history"}
+        hidden={activeTab !== "history"}
         role="tabpanel"
         id="panel-history"
         aria-labelledby="tab-history"
@@ -404,7 +514,9 @@ export default function DocumentPage() {
         {loadedTabs.includes("history") && (
           <DocumentHistory
             document={document}
-            canRestore={canEdit && !dirty}
+            canRestore={
+              canEdit && !dirty && !busy && !importing && conflict === null
+            }
             onRestored={(next) => {
               accept(next);
               setNotice(

@@ -7,6 +7,11 @@ import {
   restoreSchema,
   setupSchema,
   updateDocumentSchema,
+  statusSchema,
+  canEditDocumentContent,
+  updateDocumentStatusSchema,
+  updateDocumentGitHubLinksSchema,
+  apiTokenSchema,
 } from "../src/contracts";
 
 const content = {
@@ -71,6 +76,49 @@ describe("planning input contract", () => {
     ).toBe(3);
   });
 
+  it("freezes the handoff and later states and permits reopening into active planning", () => {
+    expect(statusSchema.options.filter(canEditDocumentContent)).toEqual([
+      "draft",
+      "active",
+    ]);
+    for (const status of [
+      "ready",
+      "in_development",
+      "completed",
+      "archived",
+    ] as const)
+      expect(canEditDocumentContent(status)).toBe(false);
+    expect(
+      updateDocumentStatusSchema.parse({
+        status: "active",
+        expectedRevision: 4,
+      }),
+    ).toEqual({ status: "active", expectedRevision: 4 });
+  });
+
+  it("requires revision preconditions for metadata and rejects content smuggled into a status write", () => {
+    expect(
+      updateDocumentStatusSchema.safeParse({ status: "ready" }).success,
+    ).toBe(false);
+    expect(
+      updateDocumentGitHubLinksSchema.safeParse({ githubLinks: [] }).success,
+    ).toBe(false);
+    expect(
+      updateDocumentStatusSchema.safeParse({
+        status: "draft",
+        expectedRevision: 1,
+        html: "<p>Replacement</p>",
+      }).success,
+    ).toBe(false);
+    expect(
+      updateDocumentGitHubLinksSchema.safeParse({
+        githubLinks: [],
+        expectedRevision: 1,
+        status: "draft",
+      }).success,
+    ).toBe(false);
+  });
+
   it("requires a meaningful comment and limits section anchors", () => {
     expect(commentSchema.safeParse({ body: " \n " }).success).toBe(false);
     expect(
@@ -130,5 +178,33 @@ describe("identity and AI access input contract", () => {
         scope: "read",
       }),
     ).toEqual({ name: "Research assistant", scope: "read" });
+  });
+
+  it("returns only a masked key identifier in metadata and permits unavailable historical suffixes", () => {
+    const metadata = {
+      id: "123e4567-e89b-42d3-a456-426614174000",
+      name: "AI client",
+      scope: "read",
+      createdAt: "2026-09-30T10:00:00.000Z",
+      expiresAt: "2026-12-29T10:00:00.000Z",
+      lastUsedAt: null,
+      maskedToken: "********aB_9",
+    };
+    expect(
+      apiTokenSchema.parse({
+        ...metadata,
+        token: "full-secret",
+        secret_hash: "hash",
+      }),
+    ).toEqual(metadata);
+    expect(
+      apiTokenSchema.parse({ ...metadata, maskedToken: null }).maskedToken,
+    ).toBeNull();
+    expect(
+      apiTokenSchema.safeParse({
+        ...metadata,
+        maskedToken: "pr_complete-secret",
+      }).success,
+    ).toBe(false);
   });
 });

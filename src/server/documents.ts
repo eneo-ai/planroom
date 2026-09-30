@@ -4,13 +4,16 @@ import type {
   Comment,
   DocumentContent,
   DocumentDetail,
+  DocumentGitHubLinksUpdate,
   DocumentStatus,
+  DocumentStatusUpdate,
   DocumentSummary,
   DocumentUpdate,
   RevisionDetail,
   RevisionSummary,
   User,
 } from "../contracts";
+import { canEditDocumentContent, documentStatusLabels } from "../contracts";
 import {
   assertReady,
   assertWrite,
@@ -29,6 +32,7 @@ interface RevisionRow {
   html: string;
   instructions: string;
   status: DocumentStatus;
+  github_links: string[];
   change_summary: string;
   author_name: string;
   created_at: Date;
@@ -43,6 +47,7 @@ type SummaryRow = Pick<
   | "title"
   | "description"
   | "status"
+  | "github_links"
   | "number"
   | "author_name"
   | "document_created_at"
@@ -53,13 +58,14 @@ type RevisionSummaryRow = Pick<
   "id" | "number" | "title" | "change_summary" | "author_name" | "created_at"
 >;
 const currentSelect = `SELECT r.*, u.name AS author_name, d.created_at AS document_created_at, d.updated_at FROM documents d JOIN document_revisions r ON r.document_id=d.id AND r.number=d.current_revision JOIN users u ON u.id=r.author_id`;
-const summarySelect = `SELECT r.document_id,r.number,r.title,r.description,r.status,u.name AS author_name,d.created_at AS document_created_at,d.updated_at FROM documents d JOIN document_revisions r ON r.document_id=d.id AND r.number=d.current_revision JOIN users u ON u.id=r.author_id`;
+const summarySelect = `SELECT r.document_id,r.number,r.title,r.description,r.status,r.github_links,u.name AS author_name,d.created_at AS document_created_at,d.updated_at FROM documents d JOIN document_revisions r ON r.document_id=d.id AND r.number=d.current_revision JOIN users u ON u.id=r.author_id`;
 function summary(row: SummaryRow): DocumentSummary {
   return {
     id: row.document_id,
     title: row.title,
     description: row.description,
     status: row.status,
+    githubLinks: row.github_links,
     currentRevision: row.number,
     authorName: row.author_name,
     createdAt: row.document_created_at.toISOString(),
@@ -91,6 +97,7 @@ function revisionDetail(row: RevisionRow): RevisionDetail {
     html: row.html,
     instructions: row.instructions,
     status: row.status,
+    githubLinks: row.github_links,
   };
 }
 async function fetchDocument(
@@ -126,10 +133,10 @@ async function insertRevision(
   author: User,
   id: string,
   number: number,
-  content: DocumentContent,
+  content: DocumentContent & Pick<DocumentDetail, "githubLinks">,
 ): Promise<void> {
   await client.query(
-    "INSERT INTO document_revisions(id,document_id,number,title,description,html,instructions,status,change_summary,author_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+    "INSERT INTO document_revisions(id,document_id,number,title,description,html,instructions,status,change_summary,author_id,github_links) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
     [
       randomUUID(),
       id,
@@ -141,6 +148,7 @@ async function insertRevision(
       content.status,
       content.changeSummary,
       author.id,
+      content.githubLinks,
     ],
   );
 }
@@ -168,7 +176,7 @@ export async function createDocumentInTransaction(
     "INSERT INTO documents(id,current_revision) VALUES($1,1)",
     [id],
   );
-  await insertRevision(client, author, id, 1, content);
+  await insertRevision(client, author, id, 1, { ...content, githubLinks: [] });
   return fetchDocument(client, id);
 }
 async function lockRevision(
@@ -202,18 +210,84 @@ async function advance(
   );
   return fetchDocument(client, id);
 }
+async function writeRevision(
+  principal: Principal,
+  id: string,
+  expectedRevision: number,
+  change: (
+    current: DocumentDetail,
+    client: PoolClient,
+  ) => Promise<DocumentContent & Pick<DocumentDetail, "githubLinks">>,
+): Promise<DocumentDetail> {
+  assertWrite(principal);
+  return transaction(async (client) => {
+    const verified = await lockWritePrincipal(client, principal);
+    const next = await lockRevision(client, id, expectedRevision);
+    const current = await fetchDocument(client, id);
+    const content = await change(current, client);
+    await insertRevision(client, verified.user, id, next, content);
+    return advance(client, id, next);
+  });
+}
+
+function assertContentEditable(current: DocumentDetail): void {
+  if (!canEditDocumentContent(current.status))
+    throw new AppError(
+      409,
+      "DOCUMENT_LOCKED",
+      "Planeringen är låst. Byt först status till Utkast eller Aktiv planering för att ändra innehållet.",
+      current.currentRevision,
+    );
+}
+
 export async function updateDocument(
   principal: Principal,
   id: string,
   content: DocumentUpdate,
 ): Promise<DocumentDetail> {
-  assertWrite(principal);
-  return transaction(async (client) => {
-    const verified = await lockWritePrincipal(client, principal);
-    const next = await lockRevision(client, id, content.expectedRevision);
-    await insertRevision(client, verified.user, id, next, content);
-    return advance(client, id, next);
-  });
+  return writeRevision(
+    principal,
+    id,
+    content.expectedRevision,
+    async (current) => {
+      assertContentEditable(current);
+      return { ...content, githubLinks: current.githubLinks };
+    },
+  );
+}
+
+export async function updateDocumentStatus(
+  principal: Principal,
+  id: string,
+  input: DocumentStatusUpdate,
+): Promise<DocumentDetail> {
+  return writeRevision(
+    principal,
+    id,
+    input.expectedRevision,
+    async (current) => ({
+      ...current,
+      status: input.status,
+      changeSummary: `Status: ${documentStatusLabels[current.status]} → ${documentStatusLabels[input.status]}`,
+    }),
+  );
+}
+
+export async function updateDocumentGitHubLinks(
+  principal: Principal,
+  id: string,
+  input: DocumentGitHubLinksUpdate,
+): Promise<DocumentDetail> {
+  return writeRevision(
+    principal,
+    id,
+    input.expectedRevision,
+    async (current) => ({
+      ...current,
+      githubLinks: input.githubLinks,
+      changeSummary: "Uppdaterar GitHub-kopplingar",
+    }),
+  );
 }
 export async function listRevisions(
   principal: Principal,
@@ -246,27 +320,30 @@ export async function restoreDocument(
   number: number,
   input: { expectedRevision: number; changeSummary: string },
 ): Promise<DocumentDetail> {
-  assertWrite(principal);
-  return transaction(async (client) => {
-    const verified = await lockWritePrincipal(client, principal);
-    const next = await lockRevision(client, id, input.expectedRevision);
-    const source = (
-      await client.query<RevisionRow>(
-        "SELECT * FROM document_revisions WHERE document_id=$1 AND number=$2",
-        [id, number],
-      )
-    ).rows[0];
-    if (!source) notFound();
-    await insertRevision(client, verified.user, id, next, {
-      title: source.title,
-      description: source.description,
-      html: source.html,
-      instructions: source.instructions,
-      status: source.status,
-      changeSummary: input.changeSummary,
-    });
-    return advance(client, id, next);
-  });
+  return writeRevision(
+    principal,
+    id,
+    input.expectedRevision,
+    async (current, client) => {
+      assertContentEditable(current);
+      const source = (
+        await client.query<RevisionRow>(
+          "SELECT * FROM document_revisions WHERE document_id=$1 AND number=$2",
+          [id, number],
+        )
+      ).rows[0];
+      if (!source) notFound();
+      return {
+        title: source.title,
+        description: source.description,
+        html: source.html,
+        instructions: source.instructions,
+        status: source.status,
+        githubLinks: source.github_links,
+        changeSummary: input.changeSummary,
+      };
+    },
+  );
 }
 interface CommentRow {
   id: string;

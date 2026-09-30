@@ -15,6 +15,7 @@ import type {
 import { api, errorMessage } from "@/client/api";
 import { formatDate, statuses } from "@/client/document-format";
 import { HtmlViewer } from "./html-viewer";
+import { GitHubReferences } from "./document-github-links";
 
 export function DocumentHistory({
   document,
@@ -171,7 +172,7 @@ export function DocumentHistory({
                   isDisabled={!canRestore}
                   tooltip={
                     !canRestore
-                      ? "Spara eller förkasta eventuella osparade ändringar. Redaktörsbehörighet krävs."
+                      ? "Planen måste vara Utkast eller Aktiv planering utan osparade ändringar eller versionskonflikt. Redaktörsbehörighet krävs."
                       : undefined
                   }
                   onClick={() => {
@@ -183,6 +184,7 @@ export function DocumentHistory({
             </div>
           </header>
           <p>{selected.description}</p>
+          <GitHubReferences links={selected.githubLinks} />
           <HtmlViewer
             key={selected.number}
             html={selected.html}
@@ -209,8 +211,9 @@ export function DocumentHistory({
         />
         <div className="dialog-content">
           <p>
-            HTML, titel, status, beskrivning och AI-instruktioner från den här
-            versionen blir aktuella. Kommentarer behålls.
+            HTML, titel, status, beskrivning, GitHub-kopplingar och
+            AI-instruktioner från den här versionen blir aktuella. Kommentarer
+            behålls.
           </p>
           {error && (
             <Banner

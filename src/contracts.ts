@@ -1,14 +1,28 @@
 import { z } from "zod";
+import { githubLinksInputSchema, githubLinksSchema } from "./github-links";
 
 export const roleSchema = z.enum(["admin", "editor", "viewer"]);
 export const statusSchema = z.enum([
   "draft",
   "active",
+  "ready",
+  "in_development",
   "completed",
   "archived",
 ]);
 export type Role = z.infer<typeof roleSchema>;
 export type DocumentStatus = z.infer<typeof statusSchema>;
+export const documentStatusLabels: Record<DocumentStatus, string> = {
+  draft: "Utkast",
+  active: "Aktiv planering",
+  ready: "Redo för utveckling",
+  in_development: "Under utveckling",
+  completed: "Klart",
+  archived: "Arkiverat",
+};
+export function canEditDocumentContent(status: DocumentStatus): boolean {
+  return status === "draft" || status === "active";
+}
 export const revisionNumberSchema = z.number().int().positive().max(2147483647);
 export const tokenScopeSchema = z.enum(["read", "write"]);
 const timestampSchema = z.iso.datetime();
@@ -24,6 +38,7 @@ export const documentSummarySchema = z.object({
   title: z.string(),
   description: z.string(),
   status: statusSchema,
+  githubLinks: githubLinksSchema,
   currentRevision: revisionNumberSchema,
   authorName: z.string(),
   createdAt: timestampSchema,
@@ -47,6 +62,7 @@ export const revisionDetailSchema = revisionSummarySchema.extend({
   html: z.string(),
   instructions: z.string(),
   status: statusSchema,
+  githubLinks: githubLinksSchema,
 });
 export const commentResponseSchema = z.object({
   id: z.uuid(),
@@ -62,6 +78,10 @@ export const apiTokenSchema = z.object({
   createdAt: timestampSchema,
   expiresAt: timestampSchema,
   lastUsedAt: timestampSchema.nullable(),
+  maskedToken: z
+    .string()
+    .regex(/^\*{8}[A-Za-z0-9_-]{4}$/)
+    .nullable(),
 });
 export const apiErrorBodySchema = z.object({
   error: z.object({
@@ -148,6 +168,14 @@ export const documentContentSchema = z.object({
 export const updateDocumentSchema = documentContentSchema.extend({
   expectedRevision: revisionNumberSchema,
 });
+export const updateDocumentStatusSchema = z.strictObject({
+  expectedRevision: revisionNumberSchema,
+  status: statusSchema,
+});
+export const updateDocumentGitHubLinksSchema = z.strictObject({
+  expectedRevision: revisionNumberSchema,
+  githubLinks: githubLinksInputSchema,
+});
 export const restoreSchema = z.object({
   expectedRevision: revisionNumberSchema,
   changeSummary: z.string().trim().min(1).max(1000),
@@ -162,3 +190,7 @@ export const createTokenSchema = z.object({
 });
 export type DocumentContent = z.infer<typeof documentContentSchema>;
 export type DocumentUpdate = z.infer<typeof updateDocumentSchema>;
+export type DocumentStatusUpdate = z.infer<typeof updateDocumentStatusSchema>;
+export type DocumentGitHubLinksUpdate = z.infer<
+  typeof updateDocumentGitHubLinksSchema
+>;

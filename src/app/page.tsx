@@ -9,10 +9,14 @@ import { Selector } from "@astryxdesign/core/Selector";
 import { Banner } from "@astryxdesign/core/Banner";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { FileText, Search, Plus, ArrowUpRight, Layers3 } from "lucide-react";
-import type { DocumentSummary } from "@/contracts";
+import { documentSummarySchema, type DocumentSummary } from "@/contracts";
 import { api, errorMessage } from "@/client/api";
 import { formatDate, statusOptions } from "@/client/document-format";
-import { DocumentStatusBadge } from "@/components/document-status";
+import {
+  DocumentStatusBadge,
+  DocumentStatusControl,
+} from "@/components/document-status";
+import { GitHubReferences } from "@/components/document-github-links";
 import { useSession } from "@/components/session";
 
 export default function Dashboard() {
@@ -22,6 +26,9 @@ export default function Dashboard() {
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [notice, setNotice] = useState("");
+  const canWrite = user?.role === "admin" || user?.role === "editor";
   const load = useCallback(
     async (signal?: AbortSignal) => {
       setLoading(true);
@@ -99,6 +106,27 @@ export default function Dashboard() {
           width={190}
         />
       </div>
+      {actionError && (
+        <Banner
+          status="error"
+          title="Statusen kunde inte ändras"
+          description={actionError}
+          endContent={
+            <Button
+              label="Hämta aktuell version"
+              onClick={() => {
+                setActionError("");
+                void load();
+              }}
+            />
+          }
+        />
+      )}
+      {notice && (
+        <p className="fine-print" role="status">
+          {notice}
+        </p>
+      )}
       {error ? (
         <Banner
           status="error"
@@ -161,12 +189,36 @@ export default function Dashboard() {
               >
                 <div className="document-card-top">
                   <FileText size={22} aria-hidden />
-                  <DocumentStatusBadge status={document.status} />
+                  {canWrite ? (
+                    <DocumentStatusControl
+                      document={document}
+                      onUpdated={(next) => {
+                        const summary = documentSummarySchema.parse(next);
+                        setDocuments((current) =>
+                          current
+                            .map((entry) =>
+                              entry.id === summary.id ? summary : entry,
+                            )
+                            .filter(
+                              (entry) => !status || entry.status === status,
+                            ),
+                        );
+                        setActionError("");
+                        setNotice(
+                          `Statusen för ${next.title} har uppdaterats.`,
+                        );
+                      }}
+                      onError={(cause) => setActionError(errorMessage(cause))}
+                    />
+                  ) : (
+                    <DocumentStatusBadge status={document.status} />
+                  )}
                 </div>
                 <h3>{document.title}</h3>
                 <p className="muted clamp-3">
                   {document.description || "Ingen beskrivning ännu."}
                 </p>
+                <GitHubReferences links={document.githubLinks} />
                 <div className="document-card-footer">
                   <div>
                     <span className="revision-caption">
