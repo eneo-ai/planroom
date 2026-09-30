@@ -1,3 +1,35 @@
+export interface HtmlPreviewConsent {
+  source: string;
+  mode: "protected" | "confirming" | "interactive";
+}
+
+export type HtmlPreviewConsentAction = {
+  type: "source-changed" | "request" | "approve" | "dismiss" | "disable";
+  source: string;
+};
+
+/** A trust decision belongs to the displayed source, never an incoming import. */
+export function htmlPreviewConsent(
+  state: HtmlPreviewConsent,
+  action: HtmlPreviewConsentAction,
+): HtmlPreviewConsent {
+  if (action.type === "source-changed")
+    return action.source === state.source
+      ? state
+      : { source: action.source, mode: "protected" };
+  if (action.source !== state.source) return state;
+  if (action.type === "request" && state.mode === "protected")
+    return { ...state, mode: "confirming" };
+  if (action.type === "approve" && state.mode === "confirming")
+    return { ...state, mode: "interactive" };
+  if (
+    (action.type === "dismiss" && state.mode === "confirming") ||
+    (action.type === "disable" && state.mode === "interactive")
+  )
+    return { ...state, mode: "protected" };
+  return state;
+}
+
 /** Preview is derived from source; never persist this wrapper into a revision. */
 export function htmlPreview(html: string, allowScripts = false): string {
   const policy = [

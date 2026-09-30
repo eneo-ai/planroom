@@ -1,0 +1,28 @@
+.placeholder {
+  min-height: 720px;
+  height: 75dvh;
+}
+
+.fullscreenBody {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  gap: var(--spacing-3);
+}
+
+.fullscreenCanvas {
+  flex: 1;
+  min-height: 0;
+}
+
+.fullscreenCanvas .frame {
+  height: 100%;
+  min-height: 0;
+}
+
+@media (max-width: 700px) {
+  .fullscreenBody :global(.viewer-toolbar) {
+    flex-wrap: wrap;
+  }
+}
