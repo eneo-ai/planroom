@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
+import { ClickableCard } from "@astryxdesign/core/ClickableCard";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Banner } from "@astryxdesign/core/Banner";
-import { Link } from "@astryxdesign/core/Link";
 import { FileText, Search, Plus, ArrowUpRight, Layers3 } from "lucide-react";
 import type { DocumentSummary } from "@/contracts";
 import { api, errorMessage } from "@/client/api";
@@ -146,20 +146,18 @@ export default function Dashboard() {
           </div>
           <div className="document-grid">
             {documents.map((document) => (
-              <Card key={document.id} padding={6} className="document-card">
+              <ClickableCard
+                key={document.id}
+                label={document.title}
+                href={`/documents/${document.id}`}
+                padding={6}
+                className="document-card"
+              >
                 <div className="document-card-top">
                   <FileText size={22} aria-hidden />
                   <DocumentStatusBadge status={document.status} />
                 </div>
-                <h3>
-                  <Link
-                    href={`/documents/${document.id}`}
-                    color="primary"
-                    weight="semibold"
-                  >
-                    {document.title}
-                  </Link>
-                </h3>
+                <h3>{document.title}</h3>
                 <p className="muted clamp-3">
                   {document.description || "Ingen beskrivning ännu."}
                 </p>
@@ -173,9 +171,11 @@ export default function Dashboard() {
                       {formatDate(document.updatedAt)}
                     </time>
                   </div>
-                  <ArrowUpRight size={18} aria-hidden />
+                  <span className="document-card-action">
+                    Öppna <ArrowUpRight size={18} aria-hidden />
+                  </span>
                 </div>
-              </Card>
+              </ClickableCard>
             ))}
           </div>
         </>

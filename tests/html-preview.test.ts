@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parse, type DefaultTreeAdapterMap } from "parse5";
 import { readFileSync } from "node:fs";
 import { htmlPreview } from "../src/client/html-preview";
+import config from "../next.config";
 
 type Node = DefaultTreeAdapterMap["node"];
 type Element = DefaultTreeAdapterMap["element"];
@@ -38,12 +39,43 @@ describe("HTML preview isolation", () => {
       const restrictions = policy(preview);
       expect(restrictions).toContain("script-src 'none'");
       expect(restrictions).toContain("connect-src 'none'");
-      expect(restrictions).toContain("base-uri 'none'");
+      expect(restrictions).toContain("base-uri about:");
       expect(preview.indexOf("Content-Security-Policy")).toBeLessThan(
         preview.indexOf(source),
       );
     },
   );
+  it("resolves native fragments against srcdoc before any supplied base", () => {
+    const source =
+      '<base href="https://attacker.example/" target="_top"><a href="#arkitektur">Arkitektur</a><section id="arkitektur">Plan</section>';
+    const preview = htmlPreview(source);
+    const document = parse(preview);
+    const base = elements(document, "base")[0];
+    const href = base.attrs.find((attr) => attr.name === "href")?.value;
+    expect(href).toBe("about:srcdoc");
+    expect(base.attrs.find((attr) => attr.name === "target")?.value).toBe(
+      "_self",
+    );
+    const anchor = elements(document, "a")[0];
+    const fragment = anchor.attrs.find((attr) => attr.name === "href")?.value;
+    expect(new URL(fragment ?? "", href).href).toBe("about:srcdoc#arkitektur");
+    expect(preview.indexOf("Content-Security-Policy")).toBeLessThan(
+      preview.indexOf('<base href="about:srcdoc"'),
+    );
+    expect(preview.indexOf('<base href="about:srcdoc"')).toBeLessThan(
+      preview.indexOf(source),
+    );
+    expect(preview).toContain(source);
+  });
+  it("permits the fixed srcdoc base through the inherited parent policy", async () => {
+    const headers = await config.headers?.();
+    const parentPolicy = headers
+      ?.flatMap((route) => route.headers)
+      .find((header) => header.key === "Content-Security-Policy")?.value;
+    expect(parentPolicy).toContain("base-uri 'self' about:");
+    expect(parentPolicy).toContain("frame-src 'self' about:;");
+    expect(parentPolicy).not.toContain("blob:");
+  });
   it("allows inline demonstrations only when explicitly enabled, never external resources", () => {
     const restrictions = policy(htmlPreview("<script>demo()</script>", true));
     expect(restrictions).toContain("script-src 'unsafe-inline'");

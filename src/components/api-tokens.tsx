@@ -12,6 +12,7 @@ import { createTokenSchema, type ApiToken } from "@/contracts";
 import { api, errorMessage } from "@/client/api";
 import { formatDate } from "@/client/document-format";
 import { useSession } from "./session";
+import { McpGuide } from "./mcp-guide";
 
 export function ApiTokens() {
   const { user } = useSession();
@@ -93,16 +94,12 @@ export function ApiTokens() {
   return (
     <div className="page-stack">
       <div>
-        <h2>Koppla in din AI-klient</h2>
+        <h2>1. Skapa en personlig åtkomstnyckel</h2>
         <p className="muted">
-          Skapa en personlig åtkomstnyckel och anslut klienten till Planrooms
-          MCP-endpoint med Bearer-autentisering.
-        </p>
-        <p className="endpoint-line">
-          <code>
-            {typeof window !== "undefined" ? window.location.origin : ""}
-            /api/mcp
-          </code>
+          Ge nyckeln ett namn för den AI-klient du ska ansluta. Välj endast
+          läsning för att granska planer eller läsning och uppdatering för att
+          även spara ändringar. Kopiera nyckeln när den visas och spara den
+          säkert.
         </p>
       </div>
       {error && (
@@ -188,6 +185,7 @@ export function ApiTokens() {
           ))}
         </ul>
       )}
+      <McpGuide />
       <Dialog
         isOpen={secret !== null}
         onOpenChange={(open) => {

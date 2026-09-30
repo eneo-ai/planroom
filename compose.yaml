@@ -19,6 +19,7 @@ services:
     cpus: 1
 
   app:
+    image: planroom-app
     build: .
     restart: unless-stopped
     init: true
@@ -55,6 +56,26 @@ services:
       retries: 3
     mem_limit: 1g
     cpus: 1
+
+  mcp-bridge:
+    image: planroom-app
+    profiles: ["desktop"]
+    entrypoint: ["node", "scripts/mcp-stdio.mjs"]
+    command: []
+    environment:
+      PLANROOM_MCP_URL: http://app:3000/api/mcp
+      APP_URL: ${APP_URL:-http://localhost:3210}
+      NODE_OPTIONS: --max-old-space-size=128
+    user: "1001:1001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    cpus: 0.5
+    stdin_open: true
+    init: true
 
 volumes:
   postgres_data:

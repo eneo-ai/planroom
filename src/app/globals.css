@@ -47,14 +47,6 @@ textarea,
 select {
   touch-action: manipulation;
 }
-a:focus-visible,
-button:focus-visible,
-input:focus-visible,
-textarea:focus-visible,
-[tabindex]:focus-visible {
-  outline: 3px solid var(--color-text-primary);
-  outline-offset: 3px;
-}
 .muted {
   color: var(--color-text-secondary);
 }
@@ -194,6 +186,13 @@ textarea:focus-visible,
   border-top: 1px solid var(--color-border);
   color: var(--color-text-secondary);
   font-size: 0.72rem;
+}
+.document-card-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-primary);
+  font-weight: 600;
 }
 .revision-caption {
   color: var(--color-text-secondary);

@@ -56,7 +56,7 @@ export function HtmlViewer({ html, title }: { html: string; title: string }) {
       </div>
       <div className={`viewer-canvas ${compact ? "compact" : ""}`}>
         <iframe
-          key={`${interactive}-${title}`}
+          key={interactive ? "interactive" : "protected"}
           title={`Förhandsvisning: ${title}`}
           srcDoc={source}
           sandbox={interactive ? "allow-scripts" : ""}

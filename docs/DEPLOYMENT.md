@@ -18,6 +18,8 @@ Skydda `.env` som en hemlighet, till exempel med `chmod 600 .env`. Den ska aldri
 
 Compose begränsar appen till 1 GiB minne och en CPU, och PostgreSQL till 512 MiB och en CPU. Node får högst 768 MiB JavaScript-heap i appcontainern. Dessa containergränser gäller körning; Dockerbygget har andra resurser och bör köras i CI eller under den lokala supervisorn när ett bygge uttryckligen begärs.
 
+HTTP MCP-servern ingår i appen på `/api/mcp`. Den valfria profilen `desktop` innehåller `mcp-bridge` för Claude Desktops lokala stdio-anslutning. Desktop startar den via `docker compose run --rm --no-deps -T -e PLANROOM_API_KEY mcp-bridge`, med en personlig nyckel i klientens miljö. Bryggan använder samma appimage, begränsas till 256 MiB minne och en halv CPU, öppnar ingen port och saknar databasuppgifter. Appen ska redan vara igång. Anslutningsguider med kompletta klientkonfigurationer finns under Inställningar → AI och API.
+
 ## Gemensam åtkomst
 
 Placera tjänsten bakom er befintliga HTTPS-proxy och sätt exempelvis `APP_URL=https://planroom.example.se`. Behåll loopback-bindningen om proxyn kör på samma värd. Om proxyn kör i en egen container, anslut den till Compose-nätverket och skicka trafiken till `app:3000`; välj nätverkskopplingen med er driftmiljö.

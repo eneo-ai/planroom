@@ -51,6 +51,10 @@ Rollerna är **administratör**, **redaktör** och **läsare**. Första versione
 
 ## Anslut en AI via MCP
 
+MCP-servern startar automatiskt med appen på `/api/mcp` och kör i samma container. Öppna **Inställningar → AI och API** för separata anslutningsguider för **Codex**, **Claude Code** och **Claude Desktop**, med kopierbara konfigurationer och instruktioner för personliga nycklar.
+
+Claude Desktop använder den valfria Compose-tjänsten `mcp-bridge` som en lokal stdio-brygga. Desktop startar och avslutar den lilla containern när anslutningen används. Bryggan anropar appens befintliga HTTP-server och har varken egen dokumentlagring, databasuppgifter eller en exponerad port. Den startas inte som en extra server vid vanlig `docker compose up`; appen behöver vara igång innan Desktop ansluter.
+
 Skapa en personlig API-nyckel i inställningarna. Välj läsåtkomst eller skrivåtkomst; nyckeln visas bara vid skapandet. Återkalla den i samma vy om den inte längre behövs. En nyckel ger aldrig högre behörighet än dess användarkonto.
 
 Konfigurera AI-klienten med:
@@ -70,6 +74,8 @@ REST-kontrakt och endpointlista finns i [docs/CONTRACT.md](docs/CONTRACT.md).
 ## HTML-visning
 
 HTML-källan lagras oförändrad. Förhandsvisningen körs i en isolerad iframe med inline-CSS och SVG. JavaScript är avstängt som standard. Läsaren kan uttryckligen aktivera interaktivitet för att prova demonstrationer. Importerat innehåll körs aldrig i appens egen DOM.
+
+Förhandsvisningen anger `about:srcdoc` som dokumentets bas så att avsnittslänkar, exempelvis `#arkitektur`, navigerar inom HTML-dokumentet. Dokumentets egna basadresser kan inte styra om länkar till externa sidor. JavaScript-baserade flikar behöver fortfarande att läsaren aktiverar interaktivitet.
 
 Förhandsvisningens säkerhetspolicy blockerar externa resurser, skript, typsnitt, bilder, formulär och vanliga nätverksanrop. Iframen får inte tillgång till appens session. HTML som behöver externa resurser kan därför se annorlunda ut. Gör planeringsfiler fristående genom att bädda in resurser.
 
