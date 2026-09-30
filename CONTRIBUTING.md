@@ -41,6 +41,7 @@ CI runs typechecking, the single-worker tests, a complete dependency audit and a
 - `src/contracts.ts` owns request and response contracts. `src/server/openapi.ts` publishes the REST operation catalog.
 - Authentication and role/scope decisions belong in the server. Client visibility is not authorization.
 - Astryx components and tokens own standard controls. Use existing components before creating custom UI.
+- Follow the [Astryx ownership policy](AGENTS.md#ui-ownership-astryx). Check the installed API and existing usage first; document any necessary exception and review it on library upgrades.
 - HTML preview content is untrusted. Never insert it into the application's DOM or add same-origin permission to its sandbox.
 
 Include behavior tests for changed contracts and failure modes. Prefer typed inputs and explicit lifecycle states. Avoid duplicated owners, unneeded compatibility paths, generic helper layers, `any` and ignored type errors. Keep mechanical moves separate from behavior changes where practical.

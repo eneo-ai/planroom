@@ -30,7 +30,7 @@ Developed for shared planning at **Sundsvalls kommun**, Sweden. The repository i
 - Includes administrator, editor and viewer accounts, plus scoped personal API keys.
 - Exposes REST with a public OpenAPI reference, and MCP for connected AI clients.
 
-The stack is TypeScript, React/Next.js, PostgreSQL and [Astryx](https://github.com/facebook/astryx) components and design tokens. REST and MCP share one document owner rather than separate persistence implementations.
+The stack is TypeScript, React/Next.js, PostgreSQL and [Astryx](https://github.com/facebook/astryx) components and design tokens. Astryx owns standard UI controls, navigation and dialogs; custom code composes the product and isolates the HTML preview. This is an explicit project rule in [AGENTS.md](AGENTS.md#ui-ownership-astryx). REST and MCP share one document owner rather than separate persistence implementations.
 
 ## 🚀 Run locally
 
