@@ -1,0 +1,60 @@
+name: planroom
+
+services:
+  db:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: planroom
+      POSTGRES_USER: planroom
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U planroom -d planroom"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    mem_limit: 512m
+    cpus: 1
+
+  app:
+    build: .
+    restart: unless-stopped
+    init: true
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://planroom:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/planroom
+      APP_URL: ${APP_URL:-http://localhost:3210}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@planroom.local}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:?Set SEED_ADMIN_PASSWORD in .env}
+      SEED_EXAMPLE: ${SEED_EXAMPLE:-true}
+    ports:
+      - "${PLANROOM_BIND_ADDRESS:-127.0.0.1}:${PLANROOM_PORT:-3210}:3000"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /app/.next/cache:size=64m,uid=1001,gid=1001,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+    mem_limit: 1g
+    cpus: 1
+
+volumes:
+  postgres_data:

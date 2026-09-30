@@ -1,0 +1,75 @@
+name: Check Planroom
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_DB: planroom_test
+          POSTGRES_USER: planroom
+          POSTGRES_PASSWORD: planroom_ci_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U planroom -d planroom_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+          --memory 512m
+          --cpus 1
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      NODE_OPTIONS: --max-old-space-size=4096
+      DATABASE_URL: postgres://planroom:planroom_ci_only@localhost:5432/planroom_test
+      TEST_DATABASE_URL: postgres://planroom:planroom_ci_only@localhost:5432/planroom_test
+      POSTGRES_PASSWORD: planroom_ci_only
+      APP_URL: http://localhost:3210
+      SEED_EXAMPLE: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm test
+      - name: Generate an ephemeral bootstrap password
+        shell: bash
+        run: |
+          bootstrap_password="$(openssl rand -hex 24)"
+          echo "::add-mask::$bootstrap_password"
+          echo "SEED_ADMIN_PASSWORD=$bootstrap_password" >> "$GITHUB_ENV"
+      - name: Build the production image
+        run: docker compose build app
+      - name: Check migration, seed and standalone server startup
+        run: |
+          docker compose up --no-build --wait --wait-timeout 90
+          curl --fail --max-time 5 http://localhost:3210/api/health
+          curl --fail --max-time 5 --output /dev/null http://localhost:3210/login
+      - name: Show bounded startup diagnostics on failure
+        if: failure()
+        run: |
+          if [ -n "${SEED_ADMIN_PASSWORD:-}" ]; then
+            docker compose logs --tail=100
+          fi
+      - name: Remove disposable CI containers and data
+        if: always()
+        run: |
+          if [ -n "${SEED_ADMIN_PASSWORD:-}" ]; then
+            docker compose down --volumes
+          fi

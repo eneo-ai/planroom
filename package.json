@@ -1,0 +1,44 @@
+{
+  "name": "planroom",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --hostname 0.0.0.0",
+    "build": "next build",
+    "start": "next start --hostname 0.0.0.0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --maxWorkers=1",
+    "astryx": "node node_modules/@astryxdesign/cli/clients/cli/bin/astryx.mjs",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:seed": "tsx scripts/seed.ts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "configure": "node scripts/configure.mjs",
+    "test:postgres": "node scripts/test-postgres.mjs",
+    "docker:start": "node scripts/start-local.mjs"
+  },
+  "dependencies": {
+    "@astryxdesign/core": "0.6.3",
+    "@astryxdesign/theme-neutral": "0.6.3",
+    "@modelcontextprotocol/sdk": "1.31.0",
+    "@stylexjs/stylex": "0.19.1",
+    "lucide-react": "^0.577.0",
+    "next": "16.3.7",
+    "pg": "8.23.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "tsx": "^4.21.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@astryxdesign/cli": "0.6.3",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.15.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "parse5": "^8.0.1",
+    "prettier": "^3.9.9",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
+  }
+}
