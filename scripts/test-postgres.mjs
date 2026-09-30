@@ -1,19 +1,27 @@
 // A foreground Docker test fixture stays attached to the supervised process.
 // Docker Desktop containers also have explicit memory/CPU limits; the host
 // supervisor does not account for Docker VM process trees as test children.
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { Pool } from "pg";
+import { fileURLToPath } from "node:url";
 
-const name = `planroom-test-${process.pid}`;
+const name = `planroom-test-${randomUUID()}`;
 const password = randomBytes(24).toString("hex");
-const image = "postgres:17-bookworm";
+const image =
+  "postgres:17-bookworm@sha256:639ab7ceb90e13123085b741fb31ef493fba25463002f6da665352e7b534b652";
+const directory = fileURLToPath(new URL("../", import.meta.url));
 let fixture;
+let runner;
+let fixtureError;
 let connection;
 let cleanupDone = false;
+const interrupted = new AbortController();
+let interruptedExitCode;
 function command(args) {
   const result = spawnSync("docker", args, {
+    cwd: directory,
     encoding: "utf8",
     timeout: 15000,
     maxBuffer: 512 * 1024,
@@ -27,15 +35,50 @@ function command(args) {
 function cleanup() {
   if (cleanupDone) return;
   cleanupDone = true;
-  spawnSync("docker", ["rm", "--force", name], {
-    stdio: "ignore",
+  if (!fixture?.pid) return;
+  const removed = spawnSync("docker", ["rm", "--force", name], {
+    encoding: "utf8",
+    maxBuffer: 16 * 1024,
     timeout: 10000,
+  });
+  // The attached --rm fixture may already have removed itself after a signal.
+  const alreadyRemoved =
+    !removed.error &&
+    removed.status === 1 &&
+    /No such (?:container|object):/.test(removed.stderr ?? "");
+  if (removed.error || (removed.status !== 0 && !alreadyRemoved)) {
+    console.error(
+      `Could not remove disposable test container ${name}: Docker cleanup failed or timed out. Inspect this task-owned container before retrying.`,
+    );
+    process.exitCode = 1;
+  }
+}
+async function stopOwnedChild(child, description) {
+  if (!child?.pid || child.exitCode !== null || child.signalCode !== null)
+    return;
+  if (!child.killed) child.kill("SIGTERM");
+  await new Promise((resolve) => {
+    const deadline = setTimeout(() => {
+      console.error(
+        `${description} did not exit after shutdown; terminating the task-owned process.`,
+      );
+      process.exitCode = 1;
+      child.kill("SIGKILL");
+      resolve();
+    }, 5_000);
+    child.once("close", () => {
+      clearTimeout(deadline);
+      resolve();
+    });
   });
 }
 for (const signal of ["SIGINT", "SIGTERM"])
   process.on(signal, () => {
-    cleanup();
-    process.exit(signal === "SIGINT" ? 130 : 143);
+    if (interrupted.signal.aborted) return;
+    interruptedExitCode = signal === "SIGINT" ? 130 : 143;
+    interrupted.abort();
+    runner?.kill("SIGTERM");
+    fixture?.kill("SIGTERM");
   });
 
 try {
@@ -61,14 +104,22 @@ try {
     ],
     { stdio: ["ignore", "ignore", "pipe"] },
   );
+  fixture.once("error", (error) => {
+    fixtureError = error;
+  });
   let failure = "";
   fixture.stderr.on("data", (chunk) => {
     failure = (failure + chunk.toString()).slice(-4000);
   });
   let url;
   for (let attempt = 0; attempt < 90; attempt++) {
+    interrupted.signal.throwIfAborted();
+    if (fixtureError)
+      throw new Error("Could not start the disposable Docker test database.");
     if (fixture.exitCode !== null)
-      throw new Error(`Test database exited: ${failure}`);
+      throw new Error(
+        `Test database exited: ${failure.replaceAll(password, "[redacted]")}`,
+      );
     try {
       const port = command([
         "inspect",
@@ -81,6 +132,7 @@ try {
         connectionString: url,
         max: 1,
         connectionTimeoutMillis: 1000,
+        query_timeout: 1000,
       });
       await connection.query("SELECT 1");
       break;
@@ -88,22 +140,28 @@ try {
       await connection?.end();
       connection = undefined;
       url = undefined;
-      await delay(500);
+      await delay(500, undefined, { signal: interrupted.signal });
     }
   }
-  if (!url) throw new Error(`Test database did not become ready: ${failure}`);
+  if (!url)
+    throw new Error(
+      `Test database did not become ready: ${failure.replaceAll(password, "[redacted]")}`,
+    );
   await connection.end();
   connection = undefined;
-  const runner = spawn(
+  runner = spawn(
     process.execPath,
     [
       "node_modules/vitest/vitest.mjs",
       "run",
+      "--pool=threads",
       "--maxWorkers=1",
       "tests/documents.integration.test.ts",
     ],
     {
+      cwd: directory,
       stdio: "inherit",
+      signal: interrupted.signal,
       env: {
         ...process.env,
         DATABASE_URL: url,
@@ -116,10 +174,24 @@ try {
     runner.once("error", reject);
     runner.once("exit", (code) => resolve(code ?? 1));
   });
-  process.exitCode = exit;
+  process.exitCode = interruptedExitCode ?? exit;
+} catch (error) {
+  console.error(
+    interrupted.signal.aborted
+      ? "Disposable PostgreSQL validation interrupted. Cleaning up task-owned resources."
+      : error instanceof Error
+        ? error.message.replaceAll(password, "[redacted]").slice(0, 4_000)
+        : "Disposable PostgreSQL validation failed.",
+  );
+  process.exitCode = interruptedExitCode ?? 1;
 } finally {
-  await connection?.end();
+  try {
+    await connection?.end();
+  } catch {
+    console.error("Could not close the disposable test database connection.");
+    process.exitCode = 1;
+  }
   cleanup();
-  if (fixture && fixture.exitCode === null)
-    await new Promise((resolve) => fixture.once("exit", resolve));
+  await stopOwnedChild(runner, "The integration test runner");
+  await stopOwnedChild(fixture, "The disposable Docker fixture CLI");
 }

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="88" height="88" viewBox="0 0 88 88" fill="none" role="img" aria-labelledby="title">
+  <title id="title">Planroom</title>
+  <rect x="1" y="1" width="86" height="86" rx="22" fill="#EFF6FF" stroke="#BFDBFE" stroke-width="2"/>
+  <rect x="22" y="16" width="44" height="56" rx="6" fill="white" stroke="#1E3A8A" stroke-width="3"/>
+  <path d="M32 28H56M32 35H48" stroke="#1E3A8A" stroke-width="3" stroke-linecap="round"/>
+  <path d="M36 49H52M36 49V61H52" stroke="#2563EB" stroke-width="2.5" stroke-linecap="round"/>
+  <rect x="30" y="44" width="10" height="10" rx="3" fill="#2563EB"/>
+  <rect x="50" y="44" width="10" height="10" rx="3" fill="#2563EB"/>
+  <rect x="50" y="56" width="10" height="10" rx="3" fill="#2563EB"/>
+</svg>

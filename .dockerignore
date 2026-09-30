@@ -1,9 +1,27 @@
-.git
-node_modules
-.next
-.env
-.env.*
-!.env.example
-coverage
-backups
-*.tsbuildinfo
+# Only reviewed build/runtime inputs enter the image. Private files, backups,
+# local test output, repository history and documentation stay on the host.
+**
+!package.json
+!package-lock.json
+!LICENSE
+!next.config.ts
+!next-env.d.ts
+!tsconfig.json
+!src/
+!src/**
+!public/
+!public/**
+!migrations/
+!migrations/**
+!examples/
+!examples/planning-demo.html
+!scripts/
+!scripts/entrypoint.sh
+!scripts/wait-for-db.mjs
+!scripts/migrate.ts
+!scripts/seed.ts
+!scripts/mcp-stdio.mjs
+**/.env
+**/.env.*
+**/*.pem
+**/*.key

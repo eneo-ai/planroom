@@ -2,7 +2,7 @@ name: planroom
 
 services:
   db:
-    image: postgres:17-bookworm
+    image: postgres:17-bookworm@sha256:639ab7ceb90e13123085b741fb31ef493fba25463002f6da665352e7b534b652
     restart: unless-stopped
     environment:
       POSTGRES_DB: planroom
@@ -17,6 +17,13 @@ services:
       retries: 12
     mem_limit: 512m
     cpus: 1
+    pids_limit: 128
+    networks: [database]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   app:
     image: planroom-app
@@ -56,6 +63,13 @@ services:
       retries: 3
     mem_limit: 1g
     cpus: 1
+    pids_limit: 128
+    networks: [default, database]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   mcp-bridge:
     image: planroom-app
@@ -74,8 +88,14 @@ services:
       - no-new-privileges:true
     mem_limit: 256m
     cpus: 0.5
+    pids_limit: 64
     stdin_open: true
     init: true
 
 volumes:
   postgres_data:
+
+networks:
+  default:
+  database:
+    internal: true

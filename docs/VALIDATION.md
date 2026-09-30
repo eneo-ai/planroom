@@ -1,40 +1,46 @@
-# Verifiering av första versionen
+# Validation record
 
-Kontrollerat lokalt 2026-09-30. Tunga kommandon kördes via den globala resurssupervisorn, med en arbetare. Dockerbygget begränsades separat till 2 GiB minne och en CPU.
+Latest local verification: **2026-09-30**, after the security review, fullscreen preview and private repository preparation. Findings and their fixes are recorded in [SECURITY_REVIEW.md](SECURITY_REVIEW.md).
 
-| Kontroll                                       | Resultat                                                             |
-| ---------------------------------------------- | -------------------------------------------------------------------- |
-| TypeScript, `npm run typecheck`                | Godkänd                                                              |
-| Fem fokuserade testfiler                       | 42 tester godkända                                                   |
-| PostgreSQL 17 i separat engångscontainer       | 7 integrationstester godkända                                        |
-| `npm audit --omit=dev --audit-level=high`      | Inga rapporterade sårbarheter                                        |
-| Docker-produktionsbygge                        | Godkänt                                                              |
-| Compose-uppstart med migration och engångsseed | App och databas friska                                               |
-| HTTP-kontroll mot körande Docker-app           | Hälsa, headers, startinloggning och obligatoriskt kontobyte godkända |
-| Inloggningssida i webbläsaren                  | Visuellt granskad, inga konsolfel eller varningar                    |
+## Current security changes
 
-Integrationstesterna täcker oförändrad HTML, immutabla revisioner, samtidiga uppdateringar med versionskonflikt, återställning, roller, bootstrap som inte återställs, credentialrotation och det riktiga MCP-protokollet via den officiella klienten. Samtidig kontorotation blockerar både inloggning med gamla uppgifter och utfärdande av nya nycklar från återkallade sessioner.
+| Check                                                           | Result                                                                                                           |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| TypeScript, `npm run typecheck`                                 | Passed after the final authentication changes                                                                    |
+| Focused backend, MCP and OpenAPI tests                          | 26 passed in the final run                                                                                       |
+| PostgreSQL 17 disposable integration fixture                    | 19 passed; the fixture was removed                                                                               |
+| HTML source, sandbox and consent tests                          | Passed, including all 8 parser tests against the new synthetic example                                           |
+| Reference transport, bridge, client configuration and contracts | Passed during this review                                                                                        |
+| Private configuration behavior                                  | Passed: mode 0600, no overwrite, no secret output                                                                |
+| Complete npm dependency audit                                   | No advisories reported at any severity, including development dependencies                                       |
+| `npm run format:check`, script syntax and `git diff --check`    | Passed                                                                                                           |
+| Compose configuration                                           | Passed without printing resolved environment values                                                              |
+| Docker production build and bounded startup                     | Passed; app and database healthy                                                                                 |
+| Running HTTP service                                            | Health, security headers, public discovery, OpenAPI and reference passed; anonymous document listing returns 401 |
+| Fullscreen preview in the existing signed-in browser            | Layout visually checked; Escape closes and returns focus to Expandera; HTML remains in a sandboxed frame         |
 
-Visningens HTML-parsertester kontrollerar att originalkällan och SVG bevaras medan säkerhetspolicyn ligger först, även vid missformad HTML. Navigationstesterna täcker intern sidnavigation, ankarlänkar, nedladdning och nya flikar.
+The initial focused run exposed a test fixture still pointing to the removed internal example. The test now uses the synthetic example and its 8 parser cases passed on rerun. The final 26-test run covers the later password-format, bearer identity and delayed MCP-authentication changes. Counts from separate runs overlap and should not be added together.
 
-Ingen fullständig automatiserad webbläsartestning eller WCAG-certifiering har genomförts. Första användarens kontobyte lämnas till användaren. GitHub CI är konfigurerad men har inte körts eftersom repot ännu är lokalt.
+The 19 real PostgreSQL tests cover immutable source/revisions, concurrent conflicts, restore, user roles and key scope, one-time bootstrap, account/session/key rotation, live write authorization after revocation or permission changes, ninety-day expiry and migration backfill, the fifth-failure lock deadline, bounded global/concurrent login work and the real MCP protocol. A delayed MCP read is rejected for both revoked and expired keys. A successful legacy login upgrades only its password hash and preserves existing credentials.
 
-Temporära databaser och byggcontainrar städades bort. Endast den avsedda Planroom-appen och dess databas lämnades igång. Databasen innehåller startkontot och exempelplaneringen, vardera en gång.
+Manual preview verification used the existing planning document without changing its content, revisions, account or keys. The fullscreen dialog fills the available browser viewport and provides a visible close control. Only one HTML preview is visible; the editor has its own hidden, protected preview. Script execution remained disabled. Closing with Escape restored focus to Expandera.
 
-## Navigation och MCP-guider
+## Execution and recovery
 
-Kontrollerat lokalt 2026-09-30 efter första implementationen. Typkontrollen och 43 tester i fem fokuserade testfiler för MCP, Desktop-bryggan, klientkonfigurationer, HTML-visning och kontrakt godkändes. Bryggan testas med den officiella MCP-klienten genom en riktig stdio-process och en transportfixture; testerna kontrollerar bevarad HTML, skrivbehörighet, läsbehörighet och versionskonflikter. Konfigurationstesterna kontrollerar bland annat den aktuella serveradressen och Claude Codes bokstavliga miljövariabel.
+All local installations, tests, type/format checks and builds ran through the host's global resource supervisor, with one expensive job and one test worker. The final type/check run peaked at approximately 477 MiB of measured host process memory; PostgreSQL validation at 323 MiB; Docker startup's host CLI at 118 MiB.
 
-Manuell kontroll i den befintliga inloggade Chrome-sessionen visade att klick på kortets beskrivning öppnar planeringen, att Astryx fokusram följer inmatningsfältets rundade kant och att de separata guiderna för Codex, Claude Code och Claude Desktop visas med korrekt lokal endpoint. Ingen riktig klientkonfiguration eller personlig åtkomstnyckel har skapats av testet.
+Docker Desktop's VM is measured separately from that host process tree. The temporary builder was limited to 2 GiB and one CPU, with a 1536 MiB Node heap. Runtime limits are 1 GiB for the app and 512 MiB for PostgreSQL. These are safeguards rather than guarantees against every memory spike.
 
-Docker-bryggan provades även med en ogiltig testnyckel: anslutningen misslyckades och engångscontainern städades bort. Den ordinarie appen och databasen lämnades friska och igång. Kontot som användaren redan har bytt till behölls.
+A private database backup and previous image were retained before migration 002. Startup preserved the existing administrator and documents. Test databases and temporary builders were cleaned up. The intended app and persistent database remain running.
 
-Efter den slutliga korrigeringen godkändes Docker-produktionsbygget och Compose-uppstarten. I Chrome klickades länken Arkitekturskiss i originalexemplet med JavaScript avstängt: visningsramen fick `about:srcdoc#arkitektur` och skrollade till rätt avsnitt utan localhost-fel. Original-HTML och databasens revisioner ändrades inte.
+Before the source is pushed, the original internal example is removed from distributable Git history, with a private Git recovery bundle retained. The bounded publication scan checks reachable blobs against credential patterns and configured secret values, and verifies that configuration, backups and the local agent policy are excluded. Its result is reported with the repository delivery.
 
-## OpenAPI och interaktiv REST-referens
+## Previous feature checks
 
-Kontrollerat lokalt 2026-09-30. Typkontrollen och 43 tester i fyra fokuserade testfiler godkändes. De nya kontrakttesterna jämför specifikationens endpoints/metoder med de verkliga route-filerna, verifierar schemas från Zod samt autentisering, svarskuvert, revisionskonflikter och HTML-export. Transporttester verifierar explicit bearer-header och kropp, cookies som utelämnas och avvisning av omdirigeringar och externa adresser. En separat agent granskade kontrakten mot route- och auth-implementationerna utan materiella fynd.
+Earlier focused checks verified clickable planning cards, Astryx focus styling, same-document HTML anchors, separate Codex/Claude Code/Claude Desktop instructions and the stdio bridge using the official MCP client. The interactive API reference was checked without credentials and returned 401 for document data despite an existing browser session, confirming that reference calls omit session cookies. No real personal key was created for those checks.
 
-Produktionsaudit efter den dokumenterade Undici-uppdateringen visar inga höga eller kritiska sårbarheter. Sju låga transitiva rådgivningar kvarstår i Scalars avstängda Agent/AI-beroendekedja. Paketet är låst till 0.9.76 och API-läsaren stänger av Agent, telemetri, externa standardtypsnitt och autentiseringspersistens.
+## Scope and limitations
 
-Docker-produktionsbygget och Compose-uppstarten godkändes efter den slutliga ändringen; app och databas är friska. HTTP-kontroller utan cookies gav offentlig API-översikt och OpenAPI 3.1-definition med 17 paths och 28 schemas samt 200 för referenssidan och 401 för dokumentlistan. I den befintliga inloggade webbläsaren gav referensens dokumentanrop också 401 utan nyckel, vilket verifierar att sessionscookies inte följer med. Bearer-valet är förvalt i provanropet, och ett manuellt GET /api/health gav 200 med {"status":"ok"}. Ingen personlig nyckel skapades eller användes och inga dokument, konton eller revisioner ändrades. Den tillfälliga byggcontainern städades bort.
+This is a source and behavior review, not an independent penetration test, load assessment, automated full-browser suite or WCAG certification. Base-image operating-system packages were not certified by the npm audit. A shared reverse proxy and production backup restoration still need deployment-specific validation.
+
+GitHub CI is configured to run the complete single-worker test set, type checking, dependency audit and Docker startup checks. Local results do not imply a successful GitHub run; its result must be inspected after the push. Repository visibility remains private until a maintainer explicitly changes it.
