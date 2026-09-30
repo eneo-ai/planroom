@@ -25,6 +25,11 @@ export function McpGuide() {
           ansluter genom den medföljande lokala bryggan.
         </p>
       </header>
+      <p>
+        Vill du använda REST-API:t direkt?{" "}
+        <Link href="/api/docs">Öppna den interaktiva API-dokumentationen</Link>{" "}
+        för endpoints, datamodeller och provanrop med din åtkomstnyckel.
+      </p>
       {configuration ? (
         <CodeBlock
           title="Planrooms MCP-adress"

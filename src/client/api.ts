@@ -1,12 +1,4 @@
-import { z } from "zod";
-
-const errorSchema = z.object({
-  error: z.object({
-    code: z.string(),
-    message: z.string(),
-    currentRevision: z.number().optional(),
-  }),
-});
+import { apiErrorBodySchema } from "@/contracts";
 
 export class ApiError extends Error {
   constructor(
@@ -40,7 +32,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
   if (!response.ok) {
-    const parsed = errorSchema.safeParse(
+    const parsed = apiErrorBodySchema.safeParse(
       await response.json().catch(() => null),
     );
     if (parsed.success)

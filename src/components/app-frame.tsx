@@ -17,6 +17,7 @@ import {
   Plus,
   LogOut,
   ShieldCheck,
+  Braces,
 } from "lucide-react";
 import { useSession } from "./session";
 import { api, errorMessage } from "@/client/api";
@@ -31,7 +32,12 @@ export function AppFrame({ children }: { children: ReactNode }) {
   const router = useRouter();
   const [error, setError] = useState("");
   const { requestLeave, clearDrafts } = useDocumentDrafts();
-  if (pathname === "/login" || pathname === "/setup") return children;
+  if (
+    pathname === "/login" ||
+    pathname === "/setup" ||
+    pathname === "/api/docs"
+  )
+    return children;
   async function logout() {
     try {
       await api("/api/auth/logout", { method: "POST" });
@@ -110,6 +116,12 @@ export function AppFrame({ children }: { children: ReactNode }) {
               icon={<Settings2 size={18} aria-hidden />}
               href="/settings"
               isSelected={pathname === "/settings"}
+            />
+            <SideNavItem
+              label="API-dokumentation"
+              icon={<Braces size={18} aria-hidden />}
+              href="/api/docs"
+              isSelected={pathname === "/api/docs"}
             />
           </SideNavSection>
           <div className="nav-note">

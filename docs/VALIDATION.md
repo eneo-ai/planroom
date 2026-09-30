@@ -30,3 +30,11 @@ Manuell kontroll i den befintliga inloggade Chrome-sessionen visade att klick p�
 Docker-bryggan provades även med en ogiltig testnyckel: anslutningen misslyckades och engångscontainern städades bort. Den ordinarie appen och databasen lämnades friska och igång. Kontot som användaren redan har bytt till behölls.
 
 Efter den slutliga korrigeringen godkändes Docker-produktionsbygget och Compose-uppstarten. I Chrome klickades länken Arkitekturskiss i originalexemplet med JavaScript avstängt: visningsramen fick `about:srcdoc#arkitektur` och skrollade till rätt avsnitt utan localhost-fel. Original-HTML och databasens revisioner ändrades inte.
+
+## OpenAPI och interaktiv REST-referens
+
+Kontrollerat lokalt 2026-09-30. Typkontrollen och 43 tester i fyra fokuserade testfiler godkändes. De nya kontrakttesterna jämför specifikationens endpoints/metoder med de verkliga route-filerna, verifierar schemas från Zod samt autentisering, svarskuvert, revisionskonflikter och HTML-export. Transporttester verifierar explicit bearer-header och kropp, cookies som utelämnas och avvisning av omdirigeringar och externa adresser. En separat agent granskade kontrakten mot route- och auth-implementationerna utan materiella fynd.
+
+Produktionsaudit efter den dokumenterade Undici-uppdateringen visar inga höga eller kritiska sårbarheter. Sju låga transitiva rådgivningar kvarstår i Scalars avstängda Agent/AI-beroendekedja. Paketet är låst till 0.9.76 och API-läsaren stänger av Agent, telemetri, externa standardtypsnitt och autentiseringspersistens.
+
+Docker-produktionsbygget och Compose-uppstarten godkändes efter den slutliga ändringen; app och databas är friska. HTTP-kontroller utan cookies gav offentlig API-översikt och OpenAPI 3.1-definition med 17 paths och 28 schemas samt 200 för referenssidan och 401 för dokumentlistan. I den befintliga inloggade webbläsaren gav referensens dokumentanrop också 401 utan nyckel, vilket verifierar att sessionscookies inte följer med. Bearer-valet är förvalt i provanropet, och ett manuellt GET /api/health gav 200 med {"status":"ok"}. Ingen personlig nyckel skapades eller användes och inga dokument, konton eller revisioner ändrades. Den tillfälliga byggcontainern städades bort.

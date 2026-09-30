@@ -28,6 +28,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState("");
   const pathname = usePathname();
   const router = useRouter();
+  const publicDocumentation = pathname === "/api/docs";
   const { clearDrafts } = useDocumentDrafts();
   useEffect(() => {
     clearDrafts();
@@ -47,20 +48,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     void load();
   }, [load]);
   useEffect(() => {
-    if (loading || error) return;
+    if (loading || error || publicDocumentation) return;
     if (!user && pathname !== "/login") router.replace("/login");
     else if (user?.mustChangePassword && pathname !== "/setup")
       router.replace("/setup");
     else if (user && pathname === "/login")
       router.replace(user.mustChangePassword ? "/setup" : "/");
-  }, [user, loading, pathname, error, router]);
-  if (loading)
+  }, [user, loading, pathname, error, router, publicDocumentation]);
+  if (loading && !publicDocumentation)
     return (
       <div className="center-state" role="status">
         Planroom laddar…
       </div>
     );
-  if (error)
+  if (error && !publicDocumentation)
     return (
       <div className="center-state">
         <Banner
@@ -73,10 +74,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         />
       </div>
     );
-  const allowed = user
-    ? (!user.mustChangePassword || pathname === "/setup") &&
-      pathname !== "/login"
-    : pathname === "/login";
+  const allowed =
+    publicDocumentation ||
+    (user
+      ? (!user.mustChangePassword || pathname === "/setup") &&
+        pathname !== "/login"
+      : pathname === "/login");
   if (!allowed)
     return (
       <div className="center-state" role="status">

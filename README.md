@@ -69,7 +69,16 @@ Klienten behöver kunna nå tjänstens adress och stödja egna autentiseringshea
 
 AI:n kan läsa planeringens HTML och instruktioner, arbeta vidare och spara en revision med en ändringsbeskrivning. Skrivningar kräver aktuell revision, precis som i webben. Be AI:n läsa om dokumentet vid en konflikt. Instruktioner i importerade dokument är innehåll att bedöma, inte en behörighet att kringgå tjänstens regler.
 
-REST-kontrakt och endpointlista finns i [docs/CONTRACT.md](docs/CONTRACT.md).
+## Använd REST-API:t direkt
+
+Öppna **[API-dokumentationen](http://localhost:3210/api/docs)** för en interaktiv OpenAPI 3.1-referens med endpoints, datamodeller, exempel och provanrop. Den är läsbar utan inloggning. Ange en personlig bearer-nyckel i API-läsaren för att läsa eller uppdatera planeringar; nyckeln sparas inte mellan omladdningar och webbsessionens cookies används inte för provanrop. Konto- och teamadministration som kräver en webbsession görs i appen.
+
+- `/api` ger en JSON-översikt med länkar.
+- `/api/openapi.json` ger specifikationen för import i exempelvis Postman eller generering av klientkod.
+- `/api/docs` visar den interaktiva referensen.
+- `/api/mcp` används separat av MCP-klienter; det är inte ett REST-anrop i referensen.
+
+Specifikationens schemas genereras från samma Zod-kontrakt som API:t använder. Befintliga roller, nyckelscopes och revisionskontroller gäller även för provanrop. Mer om REST-kontraktet finns i [docs/CONTRACT.md](docs/CONTRACT.md).
 
 ## HTML-visning
 

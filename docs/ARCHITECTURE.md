@@ -21,3 +21,15 @@ Reuse: original source and preview CSP, sandbox without same-origin access, offi
 Acceptance: clicking anywhere on a planning card opens it, native document anchors retain the document, JavaScript remains opt-in, focus follows Astryx control shapes, all three clients have separate guides, and Desktop forwards the same scoped tools and revision conflicts.
 
 Validation: focused typecheck and SDK behavior tests; manual verification in the existing authenticated browser after Docker update. No schema or stored document changes. Recovery: revert the application commit and rebuild; the database needs no migration or rollback.
+
+## REST API discovery and reference
+
+Problem: /api returned 404 and REST endpoints had no discoverable, browsable contract. Existing owners: request contracts in src/contracts.ts, response TypeScript interfaces, HTTP route adapters, and authentication in src/server/auth.ts.
+
+Canonical owners: src/contracts.ts now owns executable request and response schemas; src/server/openapi.ts owns the OpenAPI 3.1 operation catalog and generates schemas from those contracts. Public /api discovery and /api/openapi.json expose metadata. Scalar renders that specification on /api/docs. SessionProvider owns public page access; AppFrame owns navigation.
+
+Reuse: Zod's built-in JSON Schema generation, existing REST handlers, and the standard Scalar API reference. Consolidate client error validation into the canonical API error schema. No database, account, bearer scope, cookie authentication, MCP protocol, or document persistence changes.
+
+Acceptance: /api returns useful discovery links; /api/docs is readable without login; all existing REST operations have accurate contracts, authentication and failure responses; bearer-based calls can be tried manually against the same origin. API reference transport requests do not send session cookies, persist keys, use a third-party proxy, or perform automatic writes.
+
+Validation: focused OpenAPI coverage/schema and reference transport contract tests, TypeScript, Docker rebuild, and a manual public documentation/read-only health request check. Recovery: revert this commit and rebuild; no migration or stored-data recovery is required.

@@ -80,3 +80,7 @@ docker compose ps
 ```
 
 Uppstarten kör bara migrationer som inte redan registrerats. Migrationer är versionsstyrda och ska aldrig ändras efter att de har körts i en delad miljö. Spara tidigare Git-version eller Dockerimage. Om en uppdatering förändrar databasschemat och måste återgå, stoppa appen och återställ både föregående appversion och backup i stället för att gissa på nedåtmigrationer. Ta även en kopia av nuvarande databas innan återgång, så att senare ändringar kan granskas och återföras.
+
+## API reference dependency pin
+
+The bundled Scalar reference is client-only; fonts, telemetry, hosted agents and proxy services are disabled. Its json-magic dependency pins a vulnerable Undici release. package.json overrides Undici to the patched 7.30.0 in the same major line, compatible with the project's Node 22 runtime. The reference integration owns this pin. Remove the override when the chosen Scalar dependency tree resolves Undici >=7.30.0 without it, after checking the production audit and reference transport tests. No automatic audit --force downgrade is used.

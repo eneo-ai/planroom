@@ -9,59 +9,109 @@ export const statusSchema = z.enum([
 ]);
 export type Role = z.infer<typeof roleSchema>;
 export type DocumentStatus = z.infer<typeof statusSchema>;
-export interface User {
-  id: string;
-  name: string;
-  email: string;
-  role: Role;
-  mustChangePassword: boolean;
-}
-export interface DocumentSummary {
-  id: string;
-  title: string;
-  description: string;
-  status: DocumentStatus;
-  currentRevision: number;
-  authorName: string;
-  createdAt: string;
-  updatedAt: string;
-}
-export interface DocumentDetail extends DocumentSummary {
-  html: string;
-  instructions: string;
-  changeSummary: string;
-}
-export interface RevisionSummary {
-  id: string;
-  number: number;
-  title: string;
-  changeSummary: string;
-  authorName: string;
-  createdAt: string;
-}
-export interface RevisionDetail extends RevisionSummary {
-  description: string;
-  html: string;
-  instructions: string;
-  status: DocumentStatus;
-}
-export interface Comment {
-  id: string;
-  body: string;
-  sectionId: string | null;
-  authorName: string;
-  createdAt: string;
-}
-export interface ApiToken {
-  id: string;
-  name: string;
-  scope: "read" | "write";
-  createdAt: string;
-  lastUsedAt: string | null;
-}
-export interface ApiErrorBody {
-  error: { code: string; message: string; currentRevision?: number };
-}
+export const revisionNumberSchema = z.number().int().positive().max(2147483647);
+export const tokenScopeSchema = z.enum(["read", "write"]);
+const timestampSchema = z.iso.datetime();
+export const userSchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  email: z.email(),
+  role: roleSchema,
+  mustChangePassword: z.boolean(),
+});
+export const documentSummarySchema = z.object({
+  id: z.uuid(),
+  title: z.string(),
+  description: z.string(),
+  status: statusSchema,
+  currentRevision: revisionNumberSchema,
+  authorName: z.string(),
+  createdAt: timestampSchema,
+  updatedAt: timestampSchema,
+});
+export const documentDetailSchema = documentSummarySchema.extend({
+  html: z.string(),
+  instructions: z.string(),
+  changeSummary: z.string(),
+});
+export const revisionSummarySchema = z.object({
+  id: z.uuid(),
+  number: revisionNumberSchema,
+  title: z.string(),
+  changeSummary: z.string(),
+  authorName: z.string(),
+  createdAt: timestampSchema,
+});
+export const revisionDetailSchema = revisionSummarySchema.extend({
+  description: z.string(),
+  html: z.string(),
+  instructions: z.string(),
+  status: statusSchema,
+});
+export const commentResponseSchema = z.object({
+  id: z.uuid(),
+  body: z.string(),
+  sectionId: z.string().nullable(),
+  authorName: z.string(),
+  createdAt: timestampSchema,
+});
+export const apiTokenSchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  scope: tokenScopeSchema,
+  createdAt: timestampSchema,
+  lastUsedAt: timestampSchema.nullable(),
+});
+export const apiErrorBodySchema = z.object({
+  error: z.object({
+    code: z.string(),
+    message: z.string(),
+    currentRevision: revisionNumberSchema.optional(),
+  }),
+});
+export const userResponseSchema = z.object({ user: userSchema });
+export const sessionResponseSchema = z.object({ user: userSchema.nullable() });
+export const documentsResponseSchema = z.object({
+  documents: z.array(documentSummarySchema),
+});
+export const revisionsResponseSchema = z.object({
+  revisions: z.array(revisionSummarySchema),
+});
+export const commentsResponseSchema = z.object({
+  comments: z.array(commentResponseSchema),
+});
+export const tokensResponseSchema = z.object({
+  tokens: z.array(apiTokenSchema),
+});
+export const usersResponseSchema = z.object({ users: z.array(userSchema) });
+export const createdTokenResponseSchema = z.object({
+  token: z.string(),
+  record: apiTokenSchema,
+});
+export const okResponseSchema = z.object({ ok: z.literal(true) });
+export const healthyResponseSchema = z.object({ status: z.literal("ok") });
+export const unavailableResponseSchema = z.object({
+  status: z.literal("unavailable"),
+});
+export const apiDiscoverySchema = z.object({
+  name: z.string(),
+  version: z.string(),
+  documentation: z.string(),
+  openapi: z.string(),
+  mcp: z.object({
+    endpoint: z.string(),
+    documentation: z.string(),
+    protocol: z.string(),
+  }),
+});
+export type User = z.infer<typeof userSchema>;
+export type DocumentSummary = z.infer<typeof documentSummarySchema>;
+export type DocumentDetail = z.infer<typeof documentDetailSchema>;
+export type RevisionSummary = z.infer<typeof revisionSummarySchema>;
+export type RevisionDetail = z.infer<typeof revisionDetailSchema>;
+export type Comment = z.infer<typeof commentResponseSchema>;
+export type ApiToken = z.infer<typeof apiTokenSchema>;
+export type ApiErrorBody = z.infer<typeof apiErrorBodySchema>;
 export const passwordSchema = z
   .string()
   .min(12, "Lösenordet måste ha minst 12 tecken.")
@@ -95,10 +145,10 @@ export const documentContentSchema = z.object({
   changeSummary: z.string().trim().min(1).max(1000),
 });
 export const updateDocumentSchema = documentContentSchema.extend({
-  expectedRevision: z.number().int().positive().max(2147483647),
+  expectedRevision: revisionNumberSchema,
 });
 export const restoreSchema = z.object({
-  expectedRevision: z.number().int().positive().max(2147483647),
+  expectedRevision: revisionNumberSchema,
   changeSummary: z.string().trim().min(1).max(1000),
 });
 export const commentSchema = z.object({
@@ -107,7 +157,7 @@ export const commentSchema = z.object({
 });
 export const createTokenSchema = z.object({
   name: z.string().trim().min(1).max(100),
-  scope: z.enum(["read", "write"]),
+  scope: tokenScopeSchema,
 });
 export type DocumentContent = z.infer<typeof documentContentSchema>;
 export type DocumentUpdate = z.infer<typeof updateDocumentSchema>;
