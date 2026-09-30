@@ -1,0 +1,6 @@
+# Docker Compose loads this file automatically for local commands.
+# Hosted deployment uses only compose.yaml and routes app:3000 through its proxy.
+services:
+  app:
+    ports:
+      - "${PLANROOM_BIND_ADDRESS:-127.0.0.1}:${PLANROOM_PORT:-3210}:3000"

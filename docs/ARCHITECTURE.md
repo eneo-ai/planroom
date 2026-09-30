@@ -55,3 +55,13 @@ Owner: HtmlImport retains HTML reading, the 2 MB limit and import lifecycle. Ast
 Acceptance: importing preserves the complete source, enforces the existing file limit, reports read errors, permits choosing the same file again and signals reading completion. Empty views retain their existing loading/error/role branches. AGENTS.md makes Astryx the canonical UI system and requires concrete justification for an exception.
 
 Validation: supervised formatting and TypeScript; the focused HTML/consent contract tests; bounded Docker build and a manual import-control check when authorized. This standard-control substitution adds no dependency or schema migration. Recovery is reverting these UI files and rebuilding; persisted data is unaffected.
+
+## Hosted Compose deployment
+
+Problem: the canonical Compose stack published a fixed local port, creating an unnecessary server binding and possible conflicts in a shared Dokploy host. Its fixed app image name could also overlap with another installation.
+
+Owner: compose.yaml remains the single app/database stack. Move only the local port mapping to the standard automatic compose.override.yaml and parameterize the app image name. Dokploy owns domains and proxy routing; it uses the base file explicitly. Reuse the existing Dockerfile, health checks, migrations, resource limits and internal database network. No authentication, HTML, database version, schema or persisted-data change.
+
+Acceptance: default local Compose still binds 127.0.0.1:3210; explicit base-file deployment publishes no ports; database storage and network isolation remain intact. Each hosted installation has a unique project/image name, its own secrets and volume, and an exact HTTPS APP_URL. Verify the panel's final network configuration before deployment. When enabled, autodeploy tracks main only.
+
+Validation: supervised formatting and real Docker Compose configuration checks for local and base-only variants, without printing resolved secrets or starting containers. Then verify the intended organisation, reviewed commit, proxy routing, HTTPS and health on the remote installation when access is available. Recovery: revert the Compose change before deployment, or redeploy the previous app image under the same project name while retaining the database volume.

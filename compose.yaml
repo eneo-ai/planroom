@@ -26,7 +26,7 @@ services:
         max-file: "3"
 
   app:
-    image: planroom-app
+    image: ${PLANROOM_IMAGE:-planroom-app}
     build: .
     restart: unless-stopped
     init: true
@@ -39,8 +39,6 @@ services:
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@planroom.local}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:?Set SEED_ADMIN_PASSWORD in .env}
       SEED_EXAMPLE: ${SEED_EXAMPLE:-true}
-    ports:
-      - "${PLANROOM_BIND_ADDRESS:-127.0.0.1}:${PLANROOM_PORT:-3210}:3000"
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
@@ -72,7 +70,7 @@ services:
         max-file: "3"
 
   mcp-bridge:
-    image: planroom-app
+    image: ${PLANROOM_IMAGE:-planroom-app}
     profiles: ["desktop"]
     entrypoint: ["node", "scripts/mcp-stdio.mjs"]
     command: []

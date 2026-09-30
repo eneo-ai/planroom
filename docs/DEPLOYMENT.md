@@ -15,6 +15,7 @@ Run `node scripts/configure.mjs` from a Node.js 22 environment to create a priva
 | `APP_URL`               | Exact browser-facing origin, including scheme and port                             |
 | `PLANROOM_PORT`         | Host port, default `3210`                                                          |
 | `PLANROOM_BIND_ADDRESS` | Bind address, default `127.0.0.1`                                                  |
+| `PLANROOM_IMAGE`        | App/bridge image name; use a unique name on a shared host, default `planroom-app`  |
 
 Protect `.env`, for example with `chmod 600 .env` on POSIX systems or restrictive Windows ACLs. Do not commit it, paste it into issues, or print resolved `docker compose config` output in shared logs. Docker inspection and container environments are visible to users with Docker access; they must be trusted operators. The Desktop bridge's environment also contains its personal API key.
 
@@ -28,11 +29,25 @@ Changing `POSTGRES_PASSWORD` in `.env` does not change the password of an existi
 
 ## Shared HTTPS access
 
-Use a reverse proxy with TLS and set `APP_URL`, for example `https://planroom.example`. It must match the address in the browser for same-origin write validation and secure session cookies. Keep loopback binding when the proxy runs on the same host. A containerized proxy can join the frontend network and forward to `app:3000`; it should not join the internal database network.
+Use a reverse proxy with TLS and set `APP_URL`, for example `https://planroom.example`. It must match the address in the browser for same-origin write validation and secure session cookies. Default local commands automatically load compose.override.yaml and bind to loopback. A containerized proxy uses only compose.yaml, joins the frontend network and forwards to `app:3000`; it should not join the internal database network. The base file publishes no host ports. Commands that explicitly pass `-f compose.yaml` do not load the local override.
 
 The proxy should bound incoming bodies and timeouts and support MCP's Streamable HTTP without buffering that breaks streaming. The app additionally limits parsed JSON bodies to 3 MiB. Do not expose PostgreSQL. Use private network access or additional deployment controls when your team does not need public ingress.
 
 The HTTP MCP endpoint is part of the app. Claude Desktop optionally runs `docker compose run --rm --no-deps -T -e PLANROOM_API_KEY mcp-bridge` using a client-provided key. The bridge exposes no port and contains no database credentials. The app must already be running. Remote deployment URLs require HTTPS; loopback development and the internal `app:3000` connection are the only HTTP exceptions. Detailed client configurations are available under Settings → AI and API.
+
+## Dokploy
+
+Create a separate project in the intended organisation and a Docker Compose service using the private repository's reviewed main commit. Select Docker Compose rather than Stack: the stack builds the app from its Dockerfile. Set Compose Path to `./compose.yaml` and confirm that the displayed command explicitly selects that file. Use a unique Compose project/app name and `PLANROOM_IMAGE`, and keep the same project name on later deployments so the PostgreSQL volume persists.
+
+Provide new, distinct database and bootstrap passwords in the service's protected environment configuration. Set the exact HTTPS `APP_URL`. Reference only the required environment variables through the existing Compose environment entries; do not inject a general environment file into every container. The optional desktop bridge profile is not needed on the host. Create an independent database volume for the new installation.
+
+Configure the hostname in Dokploy's native Domains section, targeting service `app`, internal port `3000`, path `/`, HTTPS and the configured certificate resolver. Before deploying, inspect Preview Compose: the app must retain its `database` network and have the proxy network; `db` must remain solely on the internal database network. Neither service should publish a host port. If the platform changes these networks, correct the service network settings before startup.
+
+For automatic deployment, enable Auto Deploy with the push trigger on main and configure the repository/provider webhook. Verify a successful main push delivers the webhook and creates a deployment for that commit. Keep branch review and CI checks aligned with this promotion policy; changes to other branches should not deploy this installation.
+
+Limit build memory and concurrency separately from the app's runtime limits. After deployment, verify the certificate, `/api/health`, login, mandatory first account replacement, protected document endpoints and the public API reference. Verify the bootstrap without exposing its password in logs. Reuse the platform's secret storage and backup facility; never transfer a local development environment or database implicitly.
+
+These instructions follow [Dokploy Compose](https://docs.dokploy.com/docs/core/docker-compose) and [native domain routing](https://docs.dokploy.com/docs/core/docker-compose/domains).
 
 ## Data and authentication boundaries
 

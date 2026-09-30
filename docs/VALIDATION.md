@@ -4,21 +4,22 @@ Latest local verification: **2026-09-30**, after the security review, fullscreen
 
 ## Current security changes
 
-| Check                                                           | Result                                                                                                           |
-| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| TypeScript, `npm run typecheck`                                 | Passed after the final authentication and Astryx changes                                                         |
-| Focused backend, MCP and OpenAPI tests                          | 26 passed in the final run                                                                                       |
-| PostgreSQL 17 disposable integration fixture                    | 19 passed; the fixture was removed                                                                               |
-| HTML source, sandbox and consent tests                          | 12 passed after the Astryx changes, including 8 parser cases against the synthetic example                       |
-| Reference transport, bridge, client configuration and contracts | Passed during this review                                                                                        |
-| Private configuration behavior                                  | Passed: mode 0600, no overwrite, no secret output                                                                |
-| Complete npm dependency audit                                   | No advisories reported at any severity, including development dependencies                                       |
-| `npm run format:check`, script syntax and `git diff --check`    | Passed                                                                                                           |
-| Compose configuration                                           | Passed without printing resolved environment values                                                              |
-| Docker production build and bounded startup                     | Passed; app and database healthy                                                                                 |
-| Running HTTP service                                            | Health, security headers, public discovery, OpenAPI and reference passed; anonymous document listing returns 401 |
-| Fullscreen preview in the existing signed-in browser            | Layout visually checked; Escape closes and returns focus to Expandera; HTML remains in a sandboxed frame         |
-| Astryx file import                                              | Layout checked; the synthetic example populated the draft title and HTML source without saving a document        |
+| Check                                                           | Result                                                                                                            |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| TypeScript, `npm run typecheck`                                 | Passed after the final authentication and Astryx changes                                                          |
+| Focused backend, MCP and OpenAPI tests                          | 26 passed in the final run                                                                                        |
+| PostgreSQL 17 disposable integration fixture                    | 19 passed; the fixture was removed                                                                                |
+| HTML source, sandbox and consent tests                          | 12 passed after the Astryx changes, including 8 parser cases against the synthetic example                        |
+| Reference transport, bridge, client configuration and contracts | Passed during this review                                                                                         |
+| Private configuration behavior                                  | Passed: mode 0600, no overwrite, no secret output                                                                 |
+| Complete npm dependency audit                                   | No advisories reported at any severity, including development dependencies                                        |
+| `npm run format:check`, script syntax and `git diff --check`    | Passed                                                                                                            |
+| Compose configuration                                           | Passed without printing resolved environment values                                                               |
+| Hosted/local Compose variants                                   | Passed: local loopback binding, base-only deployment without published ports, isolated storage and runtime limits |
+| Docker production build and bounded startup                     | Passed; app and database healthy                                                                                  |
+| Running HTTP service                                            | Health, security headers, public discovery, OpenAPI and reference passed; anonymous document listing returns 401  |
+| Fullscreen preview in the existing signed-in browser            | Layout visually checked; Escape closes and returns focus to Expandera; HTML remains in a sandboxed frame          |
+| Astryx file import                                              | Layout checked; the synthetic example populated the draft title and HTML source without saving a document         |
 
 The initial focused run exposed a test fixture still pointing to the removed internal example. The test now uses the synthetic example and its 8 parser cases passed on rerun. The final 26-test run covers the later password-format, bearer identity and delayed MCP-authentication changes. Counts from separate runs overlap and should not be added together.
 
@@ -47,3 +48,5 @@ Earlier focused checks verified clickable planning cards, Astryx focus styling, 
 This is a source and behavior review, not an independent penetration test, load assessment, automated full-browser suite or WCAG certification. Base-image operating-system packages were not certified by the npm audit. A shared reverse proxy and production backup restoration still need deployment-specific validation.
 
 GitHub CI is configured to run the complete single-worker test set, type checking, dependency audit and Docker startup checks. Local results do not imply a successful GitHub run; its result must be inspected after the push. Repository visibility remains private until a maintainer explicitly changes it.
+
+The initial private main commit ba0ccac passed [GitHub CI](https://github.com/eneo-ai/planroom/actions/runs/36763205589), including the complete test set and fresh Docker/database startup. The later hosted Compose configuration was checked with real Compose config for both automatic local override and explicit base-only deployment, without starting or changing local containers. Hosted ingress, autodeploy delivery and first-run setup must also be verified on the selected remote installation.
