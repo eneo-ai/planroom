@@ -1,14 +1,14 @@
 "use client";
 
-import { useRef, useState, type DragEvent } from "react";
+import { useState } from "react";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { Selector } from "@astryxdesign/core/Selector";
-import { Banner } from "@astryxdesign/core/Banner";
-import { Button } from "@astryxdesign/core/Button";
-import { Upload, FileCode2 } from "lucide-react";
+import { FileInput } from "@astryxdesign/core/FileInput";
 import { statusSchema, type DocumentContent } from "@/contracts";
 import { statusOptions } from "@/client/document-format";
+
+const maxHtmlBytes = 2_000_000;
 
 export const emptyDocument: DocumentContent = {
   title: "",
@@ -29,28 +29,26 @@ export function HtmlImport({
   onReadingChange?: (reading: boolean) => void;
 }) {
   const [error, setError] = useState("");
-  const [filename, setFilename] = useState("");
-  const [dragging, setDragging] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
-  async function read(file?: File) {
-    if (!file || busy || isDisabled) return;
+  async function read(selectedFile: File) {
+    if (busy || isDisabled) return;
     setError("");
-    if (!/\.html?$/i.test(file.name)) {
+    if (!/\.html?$/i.test(selectedFile.name)) {
       setError("Välj en HTML-fil med ändelsen .html eller .htm.");
       return;
     }
-    if (file.size > 2_000_000) {
+    if (selectedFile.size > maxHtmlBytes) {
       setError("Filen får vara högst 2 MB.");
       return;
     }
     setBusy(true);
     onReadingChange?.(true);
     try {
-      const source = await file.text();
+      const source = await selectedFile.text();
       if (!source.trim()) throw new Error("HTML-filen är tom.");
-      onImport(source, file.name.replace(/\.html?$/i, ""));
-      setFilename(file.name);
+      onImport(source, selectedFile.name.replace(/\.html?$/i, ""));
+      setFile(selectedFile);
     } catch {
       setError(
         "Filen kunde inte läsas. Kontrollera att den innehåller HTML och försök igen.",
@@ -58,59 +56,29 @@ export function HtmlImport({
     } finally {
       setBusy(false);
       onReadingChange?.(false);
-      if (input.current) input.current.value = "";
     }
   }
-  function drop(event: DragEvent) {
-    event.preventDefault();
-    setDragging(false);
-    void read(event.dataTransfer.files[0]);
-  }
   return (
-    <div className="form-stack">
-      <div
-        className={`import-zone ${dragging ? "dragging" : ""}`}
-        onDragOver={(event) => {
-          event.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={drop}
-      >
-        {filename ? (
-          <FileCode2 size={30} aria-hidden />
-        ) : (
-          <Upload size={30} aria-hidden />
-        )}
-        <h3>{filename || "Dra hit er HTML-planering"}</h3>
-        <p className="muted">
-          Layout, CSS och SVG bevaras. En fil, högst 2 MB.
-        </p>
-        <Button
-          label={filename ? "Välj en annan HTML-fil" : "Välj HTML-fil"}
-          onClick={() => input.current?.click()}
-          isLoading={busy}
-          isDisabled={isDisabled}
-        />
-        <input
-          ref={input}
-          type="file"
-          accept=".html,.htm,text/html"
-          aria-label="Välj HTML-fil"
-          className="visually-hidden"
-          tabIndex={-1}
-          disabled={isDisabled || busy}
-          onChange={(event) => void read(event.target.files?.[0])}
-        />
-      </div>
-      {error && (
-        <Banner
-          status="error"
-          title="Kunde inte importera filen"
-          description={error}
-        />
-      )}
-    </div>
+    <FileInput
+      label="Importera HTML-planering"
+      mode="dropzone"
+      value={file}
+      onChange={(files) => {
+        if (busy || isDisabled) return;
+        setError("");
+        const selectedFile = Array.isArray(files) ? files[0] : files;
+        if (selectedFile) void read(selectedFile);
+        else setFile(null);
+      }}
+      accept=".html,.htm"
+      maxSize={maxHtmlBytes}
+      isDisabled={isDisabled || busy}
+      isLoading={busy}
+      placeholder="Dra hit en HTML-fil eller välj fil"
+      description="Layout, CSS och SVG bevaras. En fil, högst 2 MB. Att rensa filvalet ändrar inte importerad HTML."
+      status={error ? { type: "error", message: error } : undefined}
+      width="100%"
+    />
   );
 }
 

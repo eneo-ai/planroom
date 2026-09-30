@@ -6,6 +6,7 @@ import { TextArea } from "@astryxdesign/core/TextArea";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Button } from "@astryxdesign/core/Button";
 import { Banner } from "@astryxdesign/core/Banner";
+import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { KeyRound, Plus, Copy, Trash2 } from "lucide-react";
 import { createTokenSchema, type ApiToken } from "@/contracts";
@@ -154,10 +155,11 @@ export function ApiTokens() {
       {loading ? (
         <p role="status">Hämtar åtkomstnycklar…</p>
       ) : !hasLoaded ? null : tokens.length === 0 ? (
-        <div className="quiet-empty">
-          <KeyRound size={24} aria-hidden />
-          <p>Du har inga åtkomstnycklar ännu.</p>
-        </div>
+        <EmptyState
+          title="Du har inga åtkomstnycklar ännu"
+          icon={<KeyRound size={24} aria-hidden />}
+          isCompact
+        />
       ) : (
         <ul className="settings-list">
           {tokens.map((token) => (

@@ -45,3 +45,13 @@ Acceptance: five failed logins lock the email for ten full minutes from the fift
 Validation: supervised TypeScript and focused HTTP/password/MCP/preview/configuration/OpenAPI tests; the disposable PostgreSQL integration fixture for lock ordering, failure counters, revocation and expiry migration; complete npm audit; Compose validation; bounded Docker startup and manual fullscreen verification when authorized. Scan the public Git history for configured secrets and known credential signatures without printing their values.
 
 Risk/recovery: shared login budgets can delay legitimate sign-in during abuse and require proxy rate/connection limits. Keys already older than 90 days receive one migration transition window; new keys always use 90 days. Migration 002 is additive and migration 001 remains immutable. Prefer retaining the added expiry column during an application rollback; keep a database backup and prior image. A successful legacy login upgrades the stored password format without rotating credentials; an older verifier cannot read the new format, so password-format recovery needs a compatible image or the matching backup. Preserve unpublished Git history in a private recovery bundle before removing the original supplied example from distributable branch histories. The GitHub repository remains private until a maintainer explicitly approves public visibility.
+
+## Astryx ownership and import cleanup
+
+Problem: the import dropzone and list empty states still duplicated controls supplied by the installed Astryx library. This added drag state, native input resetting and custom styling to maintain.
+
+Owner: HtmlImport retains HTML reading, the 2 MB limit and import lifecycle. Astryx FileInput owns selection, dropping, loading, disabled state, selection clearing and localized field feedback. Astryx EmptyState owns the empty planning, comments and API-key views. Reuse the existing library, theme and domain callbacks; delete the manual drag handlers, native input wrapper and obsolete CSS. Stored HTML, authentication, roles and document persistence do not change.
+
+Acceptance: importing preserves the complete source, enforces the existing file limit, reports read errors, permits choosing the same file again and signals reading completion. Empty views retain their existing loading/error/role branches. AGENTS.md makes Astryx the canonical UI system and requires concrete justification for an exception.
+
+Validation: supervised formatting and TypeScript; the focused HTML/consent contract tests; bounded Docker build and a manual import-control check when authorized. This standard-control substitution adds no dependency or schema migration. Recovery is reverting these UI files and rebuilding; persisted data is unaffected.

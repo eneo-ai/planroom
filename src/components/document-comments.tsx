@@ -5,6 +5,7 @@ import { TextArea } from "@astryxdesign/core/TextArea";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Button } from "@astryxdesign/core/Button";
 import { Banner } from "@astryxdesign/core/Banner";
+import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { MessageSquare, Send } from "lucide-react";
 import { commentSchema, type Comment } from "@/contracts";
 import { api, errorMessage } from "@/client/api";
@@ -99,10 +100,12 @@ export function DocumentComments({
       {loading ? (
         <p role="status">Hämtar kommentarer…</p>
       ) : !hasLoaded ? null : comments.length === 0 ? (
-        <div className="quiet-empty">
-          <MessageSquare size={24} aria-hidden />
-          <p>Ingen diskussion ännu. Här finns plats för nästa beslut.</p>
-        </div>
+        <EmptyState
+          title="Ingen diskussion ännu"
+          description="Här finns plats för nästa beslut."
+          icon={<MessageSquare size={24} aria-hidden />}
+          isCompact
+        />
       ) : (
         <ol className="comment-list">
           {comments.map((comment) => (

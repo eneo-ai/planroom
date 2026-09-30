@@ -7,6 +7,7 @@ import { ClickableCard } from "@astryxdesign/core/ClickableCard";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Banner } from "@astryxdesign/core/Banner";
+import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { FileText, Search, Plus, ArrowUpRight, Layers3 } from "lucide-react";
 import type { DocumentSummary } from "@/contracts";
 import { api, errorMessage } from "@/client/api";
@@ -113,27 +114,32 @@ export default function Dashboard() {
         </div>
       ) : documents.length === 0 ? (
         <Card padding={10}>
-          <div className="empty-state">
-            <FileText size={36} aria-hidden />
-            <h2>
-              {query || status
+          <EmptyState
+            icon={<FileText size={36} aria-hidden />}
+            headingLevel={2}
+            title={
+              query || status
                 ? "Inga planeringar matchar"
-                : "Ge första planen en plats"}
-            </h2>
-            <p className="muted">
-              {query || status
+                : "Ge första planen en plats"
+            }
+            description={
+              query || status
                 ? "Prova en annan sökning eller välj alla statusar."
-                : "Importera en HTML-fil eller börja med en tom planering. Dela sedan samma länk med hela teamet."}
-            </p>
-            {user?.role !== "viewer" && !query && !status && (
-              <Button
-                label="Skapa första planeringen"
-                href="/documents/new"
-                variant="primary"
-                icon={<Plus size={18} aria-hidden />}
-              />
-            )}
-          </div>
+                : "Importera en HTML-fil eller börja med en tom planering. Dela sedan samma länk med hela teamet."
+            }
+            actions={
+              user?.role !== "viewer" &&
+              !query &&
+              !status && (
+                <Button
+                  label="Skapa första planeringen"
+                  href="/documents/new"
+                  variant="primary"
+                  icon={<Plus size={18} aria-hidden />}
+                />
+              )
+            }
+          />
         </Card>
       ) : (
         <>
