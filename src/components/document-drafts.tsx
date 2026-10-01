@@ -20,7 +20,7 @@ import { shouldGuardDraftLink } from "@/client/draft-navigation";
 
 export interface DocumentDraft {
   content: DocumentContent;
-  expectedRevision: number | null;
+  expectedVersion: number | null;
   modified: boolean;
 }
 interface Protection {

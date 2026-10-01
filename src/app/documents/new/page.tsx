@@ -25,7 +25,7 @@ export default function NewDocumentPage() {
   const [draft, setDraft] = useDocumentDraft("new");
   const value = draft?.content ?? emptyDocument;
   function setValue(content: typeof emptyDocument) {
-    setDraft({ content, expectedRevision: null, modified: true });
+    setDraft({ content, expectedVersion: null, modified: true });
   }
   const [tab, setTab] = useState("edit");
   const [error, setError] = useState("");
@@ -108,7 +108,7 @@ export default function NewDocumentPage() {
                 html,
                 title: current?.content.title || filename,
               },
-              expectedRevision: null,
+              expectedVersion: null,
               modified: true,
             }))
           }

@@ -3,65 +3,91 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "@astryxdesign/core/Link";
 import { Button } from "@astryxdesign/core/Button";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { Banner } from "@astryxdesign/core/Banner";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Github, GitPullRequest, CircleDot, Plus, Unlink } from "lucide-react";
 import {
   updateDocumentGitHubLinksSchema,
-  type DocumentDetail,
+  type DocumentGitHubLinks,
 } from "@/contracts";
 import { githubLink, type GitHubLink } from "@/github-links";
-import { api } from "@/client/api";
+import { api, ApiError, errorMessage } from "@/client/api";
 
-function GitHubReference({ reference }: { reference: GitHubLink }) {
+function GitHubReference({
+  reference,
+  compact = false,
+}: {
+  reference: GitHubLink;
+  compact?: boolean;
+}) {
   const Icon = reference.kind === "pull_request" ? GitPullRequest : CircleDot;
+  const label = `${reference.kind === "pull_request" ? "PR" : "Issue"} #${reference.number}`;
   return (
     <Link
       href={reference.url}
       isExternalLink
       isStandalone
+      label={`${reference.repository}, ${label} (öppnas i ny flik)`}
       newTabLabel="(öppnas i ny flik)"
     >
-      <Icon size={15} aria-hidden /> {reference.repository} ·{" "}
-      {reference.kind === "pull_request" ? "PR" : "Issue"} #{reference.number}
+      <Icon size={16} aria-hidden />
+      {compact ? (
+        <span>
+          {reference.repository.split("/")[1]} #{reference.number}
+        </span>
+      ) : (
+        <span className="github-reference-copy">
+          <strong>{label}</strong>
+          <span className="muted">{reference.repository}</span>
+        </span>
+      )}
     </Link>
   );
 }
 
+/** Keep card/header summaries bounded; the dialog contains the complete list. */
 export function GitHubReferences({ links }: { links: string[] }) {
   if (links.length === 0) return null;
   return (
-    <div className="github-references" aria-label="GitHub-kopplingar">
-      <Github size={18} aria-hidden />
-      {links.map((url) => (
-        <GitHubReference key={url} reference={githubLink(url)} />
+    <div
+      className="github-references"
+      aria-label={`${links.length} GitHub-kopplingar`}
+    >
+      <Github size={16} aria-hidden />
+      {links.slice(0, 2).map((url) => (
+        <GitHubReference key={url} reference={githubLink(url)} compact />
       ))}
+      {links.length > 2 && (
+        <span className="fine-print">+{links.length - 2} till</span>
+      )}
     </div>
   );
 }
 
 export function DocumentGitHubLinks({
-  document,
+  documentId,
+  metadata,
   canWrite,
-  isDisabled,
   onUpdated,
-  onError,
   onSavingChange,
 }: {
-  document: DocumentDetail;
+  documentId: string;
+  metadata: DocumentGitHubLinks;
   canWrite: boolean;
-  isDisabled: boolean;
-  onUpdated: (next: DocumentDetail) => void;
-  onError: (cause: unknown) => void;
+  onUpdated: (next: DocumentGitHubLinks) => void;
   onSavingChange: (saving: boolean) => void;
 }) {
   const [url, setUrl] = useState("");
   const [validationError, setValidationError] = useState("");
+  const [error, setError] = useState("");
+  const [conflict, setConflict] = useState(false);
   const [busy, setBusy] = useState(false);
   async function save(links: string[], clearInput = false) {
-    if (!canWrite || isDisabled || busy) return;
+    if (!canWrite || busy || conflict) return;
     const parsed = updateDocumentGitHubLinksSchema.safeParse({
       githubLinks: links,
-      expectedRevision: document.currentRevision,
+      expectedLinksVersion: metadata.githubLinksVersion,
     });
     if (!parsed.success) {
       setValidationError(
@@ -69,13 +95,21 @@ export function DocumentGitHubLinks({
       );
       return;
     }
+    if (
+      clearInput &&
+      parsed.data.githubLinks.length === metadata.githubLinks.length
+    ) {
+      setValidationError("Den kopplingen finns redan i planen.");
+      return;
+    }
     setValidationError("");
+    setError("");
     setBusy(true);
     onSavingChange(true);
     try {
       onUpdated(
-        await api<DocumentDetail>(
-          `/api/documents/${document.id}/github-links`,
+        await api<DocumentGitHubLinks>(
+          `/api/documents/${documentId}/github-links`,
           {
             method: "PUT",
             body: JSON.stringify(parsed.data),
@@ -84,7 +118,29 @@ export function DocumentGitHubLinks({
       );
       if (clearInput) setUrl("");
     } catch (cause) {
-      onError(cause);
+      setConflict(
+        cause instanceof ApiError && cause.code === "GITHUB_LINKS_CONFLICT",
+      );
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(false);
+      onSavingChange(false);
+    }
+  }
+  async function reload() {
+    if (busy) return;
+    setBusy(true);
+    onSavingChange(true);
+    try {
+      onUpdated(
+        await api<DocumentGitHubLinks>(
+          `/api/documents/${documentId}/github-links`,
+        ),
+      );
+      setConflict(false);
+      setError("");
+    } catch (cause) {
+      setError(errorMessage(cause));
     } finally {
       setBusy(false);
       onSavingChange(false);
@@ -92,35 +148,48 @@ export function DocumentGitHubLinks({
   }
   function add(event: FormEvent) {
     event.preventDefault();
-    void save([...document.githubLinks, url], true);
+    void save([...metadata.githubLinks, url], true);
   }
   return (
-    <section className="form-stack" aria-labelledby="github-heading">
-      <div className="button-row">
-        <Github size={21} aria-hidden />
-        <h2 id="github-heading">GitHub-kopplingar</h2>
-      </div>
+    <div className="form-stack">
       <p className="muted">
-        Koppla planen till issues och pull requests. Kopplingarna kan uppdateras
-        även när planen är låst.
+        Koppla issues och pull requests till planen. Kopplingar kan ändras även
+        när planen är låst och skapar ingen HTML-revision.
       </p>
-      {document.githubLinks.length > 0 ? (
+      {error && (
+        <Banner
+          status="error"
+          title="Kopplingarna kunde inte uppdateras"
+          description={error}
+          endContent={
+            conflict ? (
+              <Button
+                label="Hämta senaste kopplingarna"
+                isLoading={busy}
+                onClick={() => void reload()}
+              />
+            ) : undefined
+          }
+        />
+      )}
+      {metadata.githubLinks.length > 0 ? (
         <ul className="github-link-list">
-          {document.githubLinks.map((url) => {
+          {metadata.githubLinks.map((url) => {
             const reference = githubLink(url);
             return (
               <li key={url}>
                 <GitHubReference reference={reference} />
                 {canWrite && (
-                  <Button
-                    label={`Ta bort koppling till ${reference.repository} #${reference.number}`}
+                  <IconButton
+                    label={`Ta bort ${reference.kind === "pull_request" ? "PR" : "issue"} #${reference.number} från ${reference.repository}`}
                     size="sm"
                     variant="ghost"
-                    icon={<Unlink size={15} aria-hidden />}
-                    isDisabled={isDisabled || busy}
+                    icon={<Unlink size={16} aria-hidden />}
+                    tooltip="Ta bort koppling"
+                    isDisabled={busy || conflict}
                     onClick={() =>
                       void save(
-                        document.githubLinks.filter((link) => link !== url),
+                        metadata.githubLinks.filter((link) => link !== url),
                       )
                     }
                   />
@@ -137,14 +206,14 @@ export function DocumentGitHubLinks({
       {canWrite && (
         <form className="github-link-form" onSubmit={add}>
           <TextInput
-            label="Länk till GitHub-issue eller PR"
+            label="Länk till issue eller pull request"
             value={url}
             onChange={(next) => {
               setUrl(next);
               setValidationError("");
             }}
             placeholder="https://github.com/organisation/repo/issues/123"
-            isDisabled={isDisabled || busy}
+            isDisabled={busy || conflict}
             status={
               validationError
                 ? { type: "error", message: validationError }
@@ -153,26 +222,25 @@ export function DocumentGitHubLinks({
             width="100%"
           />
           <Button
-            label="Lägg till koppling"
+            label="Koppla"
             type="submit"
             icon={<Plus size={16} aria-hidden />}
             isLoading={busy}
             isDisabled={
-              isDisabled ||
               busy ||
+              conflict ||
               !url.trim() ||
-              document.githubLinks.length >= 20
+              metadata.githubLinks.length >= 20
             }
           />
-          {(isDisabled || document.githubLinks.length >= 20) && (
+          {metadata.githubLinks.length >= 20 && (
             <p className="fine-print">
-              {document.githubLinks.length >= 20
-                ? "En planering kan ha högst 20 kopplingar."
-                : "Spara eller förkasta osparade ändringar och ladda om vid en versionskonflikt innan du ändrar kopplingar."}
+              En planering kan ha högst 20 kopplingar. Ta bort en för att lägga
+              till en ny.
             </p>
           )}
         </form>
       )}
-    </section>
+    </div>
   );
 }

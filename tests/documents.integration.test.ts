@@ -287,13 +287,13 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
         ...content,
         html: "<p>Writer A</p>",
         changeSummary: "A",
-        expectedRevision: 1,
+        expectedVersion: 1,
       }),
       updateDocument(principal, original.id, {
         ...content,
         html: "<p>Writer B</p>",
         changeSummary: "B",
-        expectedRevision: 1,
+        expectedVersion: 1,
       }),
     ]);
     expect(
@@ -302,7 +302,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     const rejection = results.find((result) => result.status === "rejected");
     if (!rejection || rejection.status !== "rejected")
       throw new Error("Expected one conflict");
-    expect(rejection.reason).toMatchObject({ status: 409, currentRevision: 2 });
+    expect(rejection.reason).toMatchObject({ status: 409, currentVersion: 2 });
     expect(
       (await listRevisions(principal, original.id)).map(
         (revision) => revision.number,
@@ -310,14 +310,14 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     ).toEqual([2, 1]);
     await expect(
       restoreDocument(principal, original.id, 999, {
-        expectedRevision: 2,
+        expectedVersion: 2,
         changeSummary: "Missing",
       }),
     ).rejects.toMatchObject({ status: 404 });
     expect((await getDocument(principal, original.id)).currentRevision).toBe(2);
     expect(
       await restoreDocument(principal, original.id, 1, {
-        expectedRevision: 2,
+        expectedVersion: 2,
         changeSummary: "Restore original",
       }),
     ).toMatchObject({
@@ -330,90 +330,43 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     );
     expect(await listRevisions(principal, original.id)).toHaveLength(3);
   });
-  it.each(["ready", "in_development", "completed", "archived"] as const)(
-    "freezes content in %s, retains discussion/references, and requires explicit reopening",
-    async (status) => {
-      const original = await createDocument(principal, content);
-      const frozen = await updateDocumentStatus(principal, original.id, {
-        status,
-        expectedRevision: 1,
-      });
-      expect(frozen).toMatchObject({
-        status,
-        currentRevision: 2,
-        html: content.html,
-        instructions: content.instructions,
-      });
-      // A full replacement cannot sneak a status change in to bypass the lock.
-      await expect(
-        updateDocument(principal, original.id, {
-          ...content,
-          status: "draft",
-          html: "<p>Must not overwrite the handoff</p>",
-          expectedRevision: 2,
-        }),
-      ).rejects.toMatchObject({ code: "DOCUMENT_LOCKED", currentRevision: 2 });
-      await expect(
-        restoreDocument(principal, original.id, 1, {
-          expectedRevision: 2,
-          changeSummary: "Must not bypass freeze",
-        }),
-      ).rejects.toMatchObject({ code: "DOCUMENT_LOCKED" });
-      expect(await listRevisions(principal, original.id)).toHaveLength(2);
-      const discussion = await addComment(principal, original.id, {
-        body: "Implementation discussion remains available",
-      });
-      expect(await listComments(principal, original.id)).toContainEqual(
-        discussion,
-      );
-      const githubLinks = ["https://github.com/eneo-ai/planroom/pull/12"];
-      const linked = await updateDocumentGitHubLinks(principal, original.id, {
-        githubLinks,
-        expectedRevision: 2,
-      });
-      expect(linked).toMatchObject({
-        status,
-        html: original.html,
-        instructions: original.instructions,
-        githubLinks,
-        currentRevision: 3,
-      });
-      expect(
-        (await listDocuments(principal, { status })).find(
-          (item) => item.id === original.id,
-        )?.githubLinks,
-      ).toEqual(githubLinks);
-      const reopened = await updateDocumentStatus(principal, original.id, {
-        status: "active",
-        expectedRevision: 3,
-      });
-      expect(reopened).toMatchObject({
-        currentRevision: 4,
-        html: original.html,
-        githubLinks,
-      });
-      const edited = await updateDocument(principal, original.id, {
-        ...content,
-        status: "active",
-        html: "<p>New scope after explicit reopening</p>",
-        expectedRevision: 4,
-      });
-      expect(edited).toMatchObject({ currentRevision: 5, githubLinks });
-      expect((await getRevision(principal, original.id, 2)).html).toBe(
-        original.html,
-      );
-    },
-  );
-  it("makes status/reference races conflict rather than overwriting content or metadata", async () => {
+  it("saves metadata without duplicating HTML and keeps concurrent metadata edits conflict-safe", async () => {
     const original = await createDocument(principal, content);
+    const changed = await updateDocument(principal, original.id, {
+      ...content,
+      title: "Renamed plan",
+      description: "More context",
+      instructions: "Updated guidance",
+      expectedVersion: original.version,
+    });
+    expect(changed).toMatchObject({
+      currentRevision: 1,
+      version: 2,
+      title: "Renamed plan",
+      instructions: "Updated guidance",
+      html: content.html,
+    });
+    expect(await listRevisions(principal, original.id)).toHaveLength(1);
+    expect(await getRevision(principal, original.id, 1)).toMatchObject({
+      title: content.title,
+      instructions: content.instructions,
+    });
+    const identical = await updateDocument(principal, original.id, {
+      ...changed,
+      changeSummary: "Only a summary",
+      expectedVersion: changed.version,
+    });
+    expect(identical).toEqual(changed);
     const results = await Promise.allSettled([
       updateDocumentStatus(principal, original.id, {
-        status: "ready",
-        expectedRevision: 1,
+        status: "active",
+        expectedVersion: 2,
       }),
-      updateDocumentGitHubLinks(principal, original.id, {
-        githubLinks: ["https://github.com/eneo-ai/planroom/issues/99"],
-        expectedRevision: 1,
+      updateDocument(principal, original.id, {
+        ...changed,
+        title: "Concurrent rename",
+        changeSummary: "Rename",
+        expectedVersion: 2,
       }),
     ]);
     expect(
@@ -421,55 +374,216 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     ).toHaveLength(1);
     const rejected = results.find((result) => result.status === "rejected");
     if (!rejected || rejected.status !== "rejected")
-      throw new Error("Expected revision conflict");
+      throw new Error("Expected a metadata conflict");
     expect(rejected.reason).toMatchObject({
-      code: "REVISION_CONFLICT",
-      currentRevision: 2,
+      code: "DOCUMENT_CONFLICT",
+      currentVersion: 3,
     });
-    expect(await getDocument(principal, original.id)).toMatchObject({
-      currentRevision: 2,
-      html: content.html,
-      title: content.title,
-      instructions: content.instructions,
+    expect(await listRevisions(principal, original.id)).toHaveLength(1);
+    const latest = await getDocument(principal, original.id);
+    const revised = await updateDocument(principal, original.id, {
+      ...latest,
+      html: latest.html + "\n",
+      changeSummary: "Source changed",
+      expectedVersion: latest.version,
     });
-    expect(await listRevisions(principal, original.id)).toHaveLength(2);
+    expect(revised).toMatchObject({ currentRevision: 2, version: 4 });
+    expect(await getRevision(principal, original.id, 2)).toMatchObject({
+      title: latest.title,
+      instructions: latest.instructions,
+      html: latest.html + "\n",
+    });
   });
-  it("restores historical GitHub references and preserves them across ordinary content writes", async () => {
+  it.each(["ready", "in_development", "completed", "archived"] as const)(
+    "freezes content in %s without a revision, retains references and requires explicit reopening",
+    async (status) => {
+      const original = await createDocument(principal, content);
+      const frozen = await updateDocumentStatus(principal, original.id, {
+        status,
+        expectedVersion: 1,
+      });
+      expect(frozen).toMatchObject({ status, currentRevision: 1, version: 2 });
+      expect(frozen).not.toHaveProperty("html");
+      await expect(
+        updateDocument(principal, original.id, {
+          ...content,
+          status: "draft",
+          html: "<p>Must not overwrite</p>",
+          expectedVersion: 2,
+        }),
+      ).rejects.toMatchObject({ code: "DOCUMENT_LOCKED", currentRevision: 1 });
+      await expect(
+        restoreDocument(principal, original.id, 1, {
+          expectedVersion: 2,
+          changeSummary: "Must not bypass freeze",
+        }),
+      ).rejects.toMatchObject({ code: "DOCUMENT_LOCKED" });
+      const discussion = await addComment(principal, original.id, {
+        body: "Implementation discussion",
+      });
+      expect(await listComments(principal, original.id)).toContainEqual(
+        discussion,
+      );
+      const githubLinks = ["https://github.com/eneo-ai/planroom/pull/12"];
+      const linked = await updateDocumentGitHubLinks(principal, original.id, {
+        githubLinks,
+        expectedLinksVersion: 1,
+      });
+      expect(linked).toEqual({ githubLinks, githubLinksVersion: 2 });
+      expect(
+        (await listDocuments(principal, { status })).find(
+          (item) => item.id === original.id,
+        )?.githubLinks,
+      ).toEqual(githubLinks);
+      expect(await getDocument(principal, original.id)).toMatchObject({
+        status,
+        currentRevision: 1,
+        version: 2,
+        html: original.html,
+        updatedAt: frozen.updatedAt,
+        authorName: frozen.authorName,
+      });
+      const reopened = await updateDocumentStatus(principal, original.id, {
+        status: "active",
+        expectedVersion: 2,
+      });
+      expect(reopened).toMatchObject({
+        currentRevision: 1,
+        version: 3,
+        githubLinks,
+      });
+      const identicalStatus = await updateDocumentStatus(
+        principal,
+        original.id,
+        { status: "active", expectedVersion: 3 },
+      );
+      expect(identicalStatus).toEqual(reopened);
+      const edited = await updateDocument(principal, original.id, {
+        ...content,
+        status: "active",
+        html: "<p>New scope</p>",
+        expectedVersion: 3,
+      });
+      expect(edited).toMatchObject({
+        currentRevision: 2,
+        version: 4,
+        githubLinks,
+      });
+      expect((await getRevision(principal, original.id, 1)).html).toBe(
+        original.html,
+      );
+      expect(await listRevisions(principal, original.id)).toHaveLength(2);
+    },
+  );
+  it("allows independent status/reference races without overwriting either", async () => {
+    const original = await createDocument(principal, content);
+    const githubLinks = ["https://github.com/eneo-ai/planroom/issues/99"];
+    const results = await Promise.allSettled([
+      updateDocumentStatus(principal, original.id, {
+        status: "ready",
+        expectedVersion: 1,
+      }),
+      updateDocumentGitHubLinks(principal, original.id, {
+        githubLinks,
+        expectedLinksVersion: 1,
+      }),
+    ]);
+    expect(results.every((result) => result.status === "fulfilled")).toBe(true);
+    expect(await getDocument(principal, original.id)).toMatchObject({
+      status: "ready",
+      currentRevision: 1,
+      version: 2,
+      githubLinksVersion: 2,
+      githubLinks,
+      html: content.html,
+    });
+    expect(await listRevisions(principal, original.id)).toHaveLength(1);
+  });
+  it("rejects competing link replacements and avoids advancing identical links", async () => {
+    const original = await createDocument(principal, content);
+    const results = await Promise.allSettled(
+      [7, 8].map((number) =>
+        updateDocumentGitHubLinks(principal, original.id, {
+          githubLinks: [`https://github.com/eneo-ai/planroom/issues/${number}`],
+          expectedLinksVersion: 1,
+        }),
+      ),
+    );
+    expect(
+      results.filter((result) => result.status === "fulfilled"),
+    ).toHaveLength(1);
+    const rejected = results.find((result) => result.status === "rejected");
+    if (!rejected || rejected.status !== "rejected")
+      throw new Error("Expected a link conflict");
+    expect(rejected.reason).toMatchObject({ code: "GITHUB_LINKS_CONFLICT" });
+    const linked = await getDocument(principal, original.id);
+    expect(
+      await updateDocumentGitHubLinks(principal, original.id, {
+        githubLinks: linked.githubLinks,
+        expectedLinksVersion: 2,
+      }),
+    ).toEqual({ githubLinks: linked.githubLinks, githubLinksVersion: 2 });
+    expect(linked).toMatchObject({
+      currentRevision: 1,
+      version: 1,
+      updatedAt: original.updatedAt,
+      authorName: original.authorName,
+    });
+  });
+  it("preserves current references during content writes and restores, including an identical HTML restore", async () => {
     const original = await createDocument(principal, content);
     const githubLinks = ["https://github.com/eneo-ai/planroom/issues/7"];
     await updateDocumentGitHubLinks(principal, original.id, {
       githubLinks,
-      expectedRevision: 1,
+      expectedLinksVersion: 1,
     });
-    await updateDocument(principal, original.id, {
+    const edited = await updateDocument(principal, original.id, {
       ...content,
-      html: "<p>Updated plan</p>",
-      expectedRevision: 2,
+      html: "<p>Updated</p>",
+      expectedVersion: 1,
     });
-    expect((await getDocument(principal, original.id)).githubLinks).toEqual(
+    expect(edited.githubLinks).toEqual(githubLinks);
+    expect((await getRevision(principal, original.id, 2)).githubLinks).toEqual(
       githubLinks,
     );
     await updateDocumentGitHubLinks(principal, original.id, {
       githubLinks: [],
-      expectedRevision: 3,
+      expectedLinksVersion: 2,
     });
-    const restored = await restoreDocument(principal, original.id, 2, {
-      expectedRevision: 4,
-      changeSummary: "Restore the linked plan",
+    const restored = await restoreDocument(principal, original.id, 1, {
+      expectedVersion: 2,
+      changeSummary: "Restore original",
     });
     expect(restored).toMatchObject({
-      currentRevision: 5,
+      currentRevision: 3,
+      version: 3,
       html: original.html,
-      githubLinks,
+      githubLinks: [],
     });
-    expect((await getRevision(principal, original.id, 1)).githubLinks).toEqual(
-      [],
-    );
-    expect((await getRevision(principal, original.id, 2)).githubLinks).toEqual(
-      githubLinks,
-    );
+    const renamed = await updateDocument(principal, original.id, {
+      ...restored,
+      title: "Rename",
+      expectedVersion: 3,
+    });
+    expect(renamed).toMatchObject({ currentRevision: 3, version: 4 });
+    const metadataRestored = await restoreDocument(principal, original.id, 1, {
+      expectedVersion: 4,
+      changeSummary: "Restore metadata",
+    });
+    expect(metadataRestored).toMatchObject({
+      currentRevision: 3,
+      version: 5,
+      title: content.title,
+      githubLinks: [],
+    });
+    expect(await listRevisions(principal, original.id)).toHaveLength(3);
+    const noopRestore = await restoreDocument(principal, original.id, 1, {
+      expectedVersion: 5,
+      changeSummary: "Already identical",
+    });
+    expect(noopRestore).toEqual(metadataRestored);
   });
-  it("enforces read scope and viewer permissions for both metadata operations", async () => {
+  it("enforces read scope and viewer permissions for metadata operations", async () => {
     const original = await createDocument(principal, content);
     for (const identity of [
       { ...principal, scope: "read" as const },
@@ -478,13 +592,13 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
       await expect(
         updateDocumentStatus(identity, original.id, {
           status: "ready",
-          expectedRevision: 1,
+          expectedVersion: 1,
         }),
       ).rejects.toMatchObject({ status: 403 });
       await expect(
         updateDocumentGitHubLinks(identity, original.id, {
           githubLinks: [],
-          expectedRevision: 1,
+          expectedLinksVersion: 1,
         }),
       ).rejects.toMatchObject({ status: 403 });
     }
@@ -826,7 +940,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
         id: original.id,
         ...content,
         html: "<h1>MCP update</h1>",
-        expectedRevision: 1,
+        expectedVersion: 1,
         changeSummary: "Updated via MCP",
       };
       const saved = await writer.callTool({
@@ -851,10 +965,10 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
       expect(
         z
           .object({
-            error: z.object({ code: z.string(), currentRevision: z.number() }),
+            error: z.object({ code: z.string(), currentVersion: z.number() }),
           })
           .parse(errorValue),
-      ).toEqual({ error: { code: "REVISION_CONFLICT", currentRevision: 2 } });
+      ).toEqual({ error: { code: "DOCUMENT_CONFLICT", currentVersion: 2 } });
       await connect(reader, readerToken.token);
       const readerTools = (await reader.listTools()).tools.map(
         (tool) => tool.name,
@@ -873,7 +987,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
         (
           await reader.callTool({
             name: "update_document",
-            arguments: { ...update, expectedRevision: 2 },
+            arguments: { ...update, expectedVersion: 2 },
           })
         ).isError,
       ).toBe(true);
@@ -935,12 +1049,12 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
       await expect(
         updateDocument(identity, document.id, {
           ...content,
-          expectedRevision: 1,
+          expectedVersion: 1,
         }),
       ).rejects.toMatchObject({ status: 401, code: "UNAUTHENTICATED" });
       await expect(
         restoreDocument(identity, document.id, 1, {
-          expectedRevision: 1,
+          expectedVersion: 1,
           changeSummary: "Not authorized",
         }),
       ).rejects.toMatchObject({ status: 401, code: "UNAUTHENTICATED" });
@@ -971,7 +1085,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
       key.record.id,
     ]);
     await expect(
-      updateDocument(cached, document.id, { ...content, expectedRevision: 1 }),
+      updateDocument(cached, document.id, { ...content, expectedVersion: 1 }),
     ).rejects.toMatchObject({ status: 403, code: "FORBIDDEN" });
     await db.query("UPDATE api_tokens SET scope='write' WHERE id=$1", [
       key.record.id,
@@ -1154,11 +1268,11 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
       () =>
         updateDocument(cached, document.id, {
           ...content,
-          expectedRevision: 1,
+          expectedVersion: 1,
         }),
       () =>
         restoreDocument(cached, document.id, 1, {
-          expectedRevision: 1,
+          expectedVersion: 1,
           changeSummary: "Expired key restore",
         }),
       () => addComment(cached, document.id, { body: "Expired key comment" }),
@@ -1174,6 +1288,71 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     expect(await listRevisions(principal, document.id)).toHaveLength(1);
     expect(await listComments(principal, document.id)).toEqual([]);
     await deleteToken(principal, key.record.id);
+  });
+  it("migrates latest metadata and references without rewriting existing HTML history", async () => {
+    const client = await db.connect();
+    const id = "a26a8dca-9632-4d15-898e-17d2f2e99b18";
+    try {
+      await client.query("BEGIN");
+      await client.query("CREATE SCHEMA metadata_migration_test");
+      await client.query("SET LOCAL search_path TO metadata_migration_test");
+      for (const name of ["001_initial.sql", "003_planning_lifecycle.sql"])
+        await client.query(
+          await readFile(resolve(process.cwd(), "migrations", name), "utf8"),
+        );
+      await client.query(
+        "INSERT INTO users(id,name,email,password_hash,role) VALUES($1,'Author','author@example.test','not-a-real-hash','editor')",
+        [principal.user.id],
+      );
+      await client.query(
+        "INSERT INTO documents(id,current_revision) VALUES($1,2)",
+        [id],
+      );
+      await client.query(
+        "INSERT INTO document_revisions(id,document_id,number,title,description,html,instructions,status,change_summary,author_id,github_links) VALUES($1,$2,1,'Old','Old description','<p>Original</p>','Old instructions','draft','First',$3,'{}'),($4,$2,2,'Current','Current description','<p>Current</p>','Current instructions','ready','Latest',$3,ARRAY['https://github.com/eneo-ai/planroom/pull/8'])",
+        [
+          "ab294e09-38d6-4356-864a-8e169cf6a201",
+          id,
+          principal.user.id,
+          "ab294e09-38d6-4356-864a-8e169cf6a202",
+        ],
+      );
+      await client.query(
+        await readFile(
+          resolve(process.cwd(), "migrations/005_document_metadata.sql"),
+          "utf8",
+        ),
+      );
+      const current = (
+        await client.query(
+          "SELECT title,description,instructions,status,github_links,version,github_links_version,current_revision FROM documents WHERE id=$1",
+          [id],
+        )
+      ).rows[0];
+      expect(current).toEqual({
+        title: "Current",
+        description: "Current description",
+        instructions: "Current instructions",
+        status: "ready",
+        github_links: ["https://github.com/eneo-ai/planroom/pull/8"],
+        version: 1,
+        github_links_version: 1,
+        current_revision: 2,
+      });
+      expect(
+        (
+          await client.query(
+            "SELECT number,html,title FROM document_revisions ORDER BY number",
+          )
+        ).rows,
+      ).toEqual([
+        { number: 1, html: "<p>Original</p>", title: "Old" },
+        { number: 2, html: "<p>Current</p>", title: "Current" },
+      ]);
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
   });
   it("backfills key lifetime without immediately revoking preexisting old keys", async () => {
     const client = await db.connect();

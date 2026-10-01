@@ -50,29 +50,28 @@ describe("planning input contract", () => {
   });
 
   it.each([undefined, 0, -1, 1.5, "1"])(
-    "requires an explicit positive integer revision for updates and restores (%s)",
-    (expectedRevision) => {
+    "requires an explicit positive integer document version for updates and restores (%s)",
+    (expectedVersion) => {
       expect(
-        updateDocumentSchema.safeParse({ ...content, expectedRevision })
-          .success,
+        updateDocumentSchema.safeParse({ ...content, expectedVersion }).success,
       ).toBe(false);
       expect(
-        restoreSchema.safeParse({ expectedRevision, changeSummary: "Restore" })
+        restoreSchema.safeParse({ expectedVersion, changeSummary: "Restore" })
           .success,
       ).toBe(false);
     },
   );
 
-  it("accepts the current revision as a numeric precondition", () => {
+  it("accepts the document version as a numeric precondition", () => {
     expect(
-      updateDocumentSchema.parse({ ...content, expectedRevision: 3 })
-        .expectedRevision,
+      updateDocumentSchema.parse({ ...content, expectedVersion: 3 })
+        .expectedVersion,
     ).toBe(3);
     expect(
       restoreSchema.parse({
-        expectedRevision: 3,
+        expectedVersion: 3,
         changeSummary: "Restore revision 1",
-      }).expectedRevision,
+      }).expectedVersion,
     ).toBe(3);
   });
 
@@ -91,12 +90,12 @@ describe("planning input contract", () => {
     expect(
       updateDocumentStatusSchema.parse({
         status: "active",
-        expectedRevision: 4,
+        expectedVersion: 4,
       }),
-    ).toEqual({ status: "active", expectedRevision: 4 });
+    ).toEqual({ status: "active", expectedVersion: 4 });
   });
 
-  it("requires revision preconditions for metadata and rejects content smuggled into a status write", () => {
+  it("requires independent version preconditions for metadata and rejects content smuggled into a status write", () => {
     expect(
       updateDocumentStatusSchema.safeParse({ status: "ready" }).success,
     ).toBe(false);
@@ -106,16 +105,42 @@ describe("planning input contract", () => {
     expect(
       updateDocumentStatusSchema.safeParse({
         status: "draft",
-        expectedRevision: 1,
+        expectedVersion: 1,
         html: "<p>Replacement</p>",
       }).success,
     ).toBe(false);
     expect(
       updateDocumentGitHubLinksSchema.safeParse({
         githubLinks: [],
-        expectedRevision: 1,
+        expectedLinksVersion: 1,
         status: "draft",
       }).success,
+    ).toBe(false);
+  });
+
+  it("requires independent link versions and rejects the document/revision precondition", () => {
+    expect(
+      updateDocumentGitHubLinksSchema.parse({
+        githubLinks: [],
+        expectedLinksVersion: 1,
+      }),
+    ).toEqual({ githubLinks: [], expectedLinksVersion: 1 });
+    for (const expectedLinksVersion of [undefined, 0, -1, 1.5, "1"])
+      expect(
+        updateDocumentGitHubLinksSchema.safeParse({
+          githubLinks: [],
+          expectedLinksVersion,
+        }).success,
+      ).toBe(false);
+    expect(
+      updateDocumentGitHubLinksSchema.safeParse({
+        githubLinks: [],
+        expectedVersion: 1,
+      }).success,
+    ).toBe(false);
+    expect(
+      updateDocumentSchema.safeParse({ ...content, expectedRevision: 1 })
+        .success,
     ).toBe(false);
   });
 

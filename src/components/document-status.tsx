@@ -5,7 +5,6 @@ import { Badge } from "@astryxdesign/core/Badge";
 import { Selector } from "@astryxdesign/core/Selector";
 import {
   statusSchema,
-  type DocumentDetail,
   type DocumentStatus,
   type DocumentSummary,
 } from "@/contracts";
@@ -32,13 +31,10 @@ export function DocumentStatusControl({
   onError,
   onSavingChange,
 }: {
-  document: Pick<
-    DocumentSummary,
-    "id" | "title" | "status" | "currentRevision"
-  >;
+  document: Pick<DocumentSummary, "id" | "title" | "status" | "version">;
   isDisabled?: boolean;
   disabledMessage?: string;
-  onUpdated: (next: DocumentDetail) => void;
+  onUpdated: (next: DocumentSummary) => void;
   onError: (cause: unknown) => void;
   onSavingChange?: (saving: boolean) => void;
 }) {
@@ -50,11 +46,11 @@ export function DocumentStatusControl({
     onSavingChange?.(true);
     try {
       onUpdated(
-        await api<DocumentDetail>(`/api/documents/${document.id}/status`, {
+        await api<DocumentSummary>(`/api/documents/${document.id}/status`, {
           method: "PUT",
           body: JSON.stringify({
             status,
-            expectedRevision: document.currentRevision,
+            expectedVersion: document.version,
           }),
         }),
       );

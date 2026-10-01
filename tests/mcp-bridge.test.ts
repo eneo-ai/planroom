@@ -59,7 +59,7 @@ describe("Claude Desktop stdio bridge", () => {
       ).toEqual({ html: "<h1>Original visual plan</h1>", currentRevision: 1 });
       const update = {
         name: "update_document",
-        arguments: { html: "<svg>Updated plan</svg>", expectedRevision: 1 },
+        arguments: { html: "<svg>Updated plan</svg>", expectedVersion: 1 },
       };
       expect(
         document.parse(resultJson(await bridge.client.callTool(update))),
@@ -67,7 +67,7 @@ describe("Claude Desktop stdio bridge", () => {
       const stale = await bridge.client.callTool(update);
       expect(stale.isError).toBe(true);
       expect(resultJson(stale)).toEqual({
-        error: { code: "REVISION_CONFLICT", currentRevision: 2 },
+        error: { code: "DOCUMENT_CONFLICT", currentVersion: 2 },
       });
     } finally {
       await bridge.client.close();
@@ -85,7 +85,7 @@ describe("Claude Desktop stdio bridge", () => {
         (
           await bridge.client.callTool({
             name: "update_document",
-            arguments: { expectedRevision: 1, html: "<p>No write</p>" },
+            arguments: { expectedVersion: 1, html: "<p>No write</p>" },
           })
         ).isError,
       ).toBe(true);

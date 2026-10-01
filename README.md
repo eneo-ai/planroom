@@ -24,7 +24,7 @@ Developed for shared planning at **Sundsvalls kommun**, Sweden. The repository i
 ## ✨ What it does
 
 - Imports and preserves original HTML, CSS and inline SVG.
-- Stores immutable revisions of HTML, instructions, status and change summaries.
+- Stores immutable HTML revisions with a metadata snapshot; status, instructions and GitHub references can change without duplicating HTML.
 - Rejects stale updates so concurrent work cannot silently overwrite newer content.
 - Provides comments, historical previews, restoration and original HTML export.
 - Includes administrator, editor and viewer accounts, plus scoped personal API keys.
@@ -68,9 +68,9 @@ docker compose down
 
 ## 🗂️ Planning together
 
-Import HTML or paste its source, add instructions for continued work, and share the document link in your team chat. The recipient signs in to the same Planroom installation. A saved update includes a change summary and the revision it was based on.
+Import HTML or paste its source, add instructions for continued work, and share the document link in your team chat. The recipient signs in to the same Planroom installation. A saved update includes a change summary and the document version it was based on. Only changed HTML creates a revision.
 
-If someone saved first, reconcile the newer version before retrying. History stays intact, and restoration creates a new revision. Unsaved drafts survive navigation within the same browser tab, but disappear on reload or logout. Save a revision for durable storage.
+If someone saved first, reconcile the newer version before retrying. History stays intact, and restoration creates a new revision when HTML changes. Unsaved drafts survive navigation within the same browser tab, but disappear on reload or logout. Save changes for durable storage.
 
 | Role          | Workspace access                                                                      |
 | ------------- | ------------------------------------------------------------------------------------- |

@@ -81,18 +81,18 @@ describe("published REST API contracts", () => {
       ],
       default: "draft",
     });
-    expect(schemas.DocumentUpdate.required).toContain("expectedRevision");
-    expect(schemas.DocumentUpdate.properties?.expectedRevision).toMatchObject({
+    expect(schemas.DocumentUpdate.required).toContain("expectedVersion");
+    expect(schemas.DocumentUpdate.properties?.expectedVersion).toMatchObject({
       type: "integer",
       exclusiveMinimum: 0,
       maximum: 2147483647,
     });
     expect(schemas.DocumentStatusUpdate.required).toEqual([
-      "expectedRevision",
+      "expectedVersion",
       "status",
     ]);
     expect(schemas.DocumentGitHubLinksUpdate.required).toEqual([
-      "expectedRevision",
+      "expectedLinksVersion",
       "githubLinks",
     ]);
     expect(
@@ -111,6 +111,26 @@ describe("published REST API contracts", () => {
       enum: ["admin", "editor", "viewer"],
     });
   });
+  it("exposes small metadata responses and independent link read/write preconditions", () => {
+    const statusResponse = operation("/api/documents/{id}/status", "put")
+      .responses["200"];
+    expect(statusResponse.content?.["application/json"].schema).toEqual({
+      $ref: "#/components/schemas/DocumentSummary",
+    });
+    for (const method of ["get", "put"] as const) {
+      const response = operation("/api/documents/{id}/github-links", method)
+        .responses["200"];
+      expect(response.content?.["application/json"].schema).toEqual({
+        $ref: "#/components/schemas/DocumentGitHubLinks",
+      });
+    }
+    const schemas = openApiDocument.components.schemas;
+    expect(schemas.DocumentGitHubLinks.properties).not.toHaveProperty("html");
+    expect(schemas.DocumentSummary.properties).not.toHaveProperty("html");
+    expect(schemas.DocumentGitHubLinks.properties).toHaveProperty(
+      "githubLinksVersion",
+    );
+  });
   it("matches response wrapper shapes while keeping session identity nullable and secrets out of users", () => {
     const user = {
       id: "f7939fd0-381b-4c8d-9f53-5adbe728ca38",
@@ -125,6 +145,8 @@ describe("published REST API contracts", () => {
       description: "",
       status: "draft",
       githubLinks: [],
+      githubLinksVersion: 1,
+      version: 1,
       currentRevision: 1,
       authorName: user.name,
       createdAt: "2026-09-30T10:00:00.000Z",
@@ -142,16 +164,16 @@ describe("published REST API contracts", () => {
     expect(
       apiErrorBodySchema.parse({
         error: {
-          code: "REVISION_CONFLICT",
+          code: "DOCUMENT_CONFLICT",
           message: "Read again",
-          currentRevision: 2,
+          currentVersion: 2,
         },
       }),
     ).toEqual({
       error: {
-        code: "REVISION_CONFLICT",
+        code: "DOCUMENT_CONFLICT",
         message: "Read again",
-        currentRevision: 2,
+        currentVersion: 2,
       },
     });
     expect(

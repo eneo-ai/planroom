@@ -14,8 +14,8 @@ import type {
 } from "@/contracts";
 import { api, errorMessage } from "@/client/api";
 import { formatDate, statuses } from "@/client/document-format";
-import { HtmlViewer } from "./html-viewer";
 import { GitHubReferences } from "./document-github-links";
+import { HtmlViewer } from "./html-viewer";
 
 export function DocumentHistory({
   document,
@@ -80,7 +80,7 @@ export function DocumentHistory({
         {
           method: "POST",
           body: JSON.stringify({
-            expectedRevision: document.currentRevision,
+            expectedVersion: document.version,
             changeSummary: summary,
           }),
         },
@@ -99,8 +99,9 @@ export function DocumentHistory({
       <div>
         <h2>Varje steg finns kvar</h2>
         <p className="muted">
-          Återställning skapar en ny version. Tidigare innehåll och
-          instruktioner bevaras i historiken.
+          Ändrad HTML skapar en ny revision med titel, status, beskrivning och
+          instruktioner som ögonblicksbild. Metadataändringar skapar inga
+          revisioner.
         </p>
       </div>
       {error && (
@@ -211,8 +212,8 @@ export function DocumentHistory({
         />
         <div className="dialog-content">
           <p>
-            HTML, titel, status, beskrivning, GitHub-kopplingar och
-            AI-instruktioner från den här versionen blir aktuella. Kommentarer
+            HTML, titel, status, beskrivning och AI-instruktioner från den här
+            versionen blir aktuella. Kommentarer och aktuella GitHub-kopplingar
             behålls.
           </p>
           {error && (
@@ -232,7 +233,7 @@ export function DocumentHistory({
           <div className="button-row">
             <Button label="Avbryt" onClick={() => setConfirm(false)} />
             <Button
-              label="Skapa återställd version"
+              label="Återställ planeringen"
               variant="primary"
               isLoading={busy}
               isDisabled={!summary.trim() || !canRestore}

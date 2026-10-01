@@ -219,6 +219,20 @@ select {
   gap: 12px;
   padding-block: 12px;
 }
+.github-reference-copy {
+  display: grid;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+.github-link-list li > :first-child {
+  min-width: 0;
+  flex: 1;
+}
+.html-export-action {
+  display: grid;
+  gap: 6px;
+  max-width: 260px;
+}
 .github-link-form {
   display: flex;
   align-items: flex-end;

@@ -6,6 +6,7 @@ export class ApiError extends Error {
     message: string,
     public readonly code: string,
     public readonly currentRevision?: number,
+    public readonly currentVersion?: number,
   ) {
     super(message);
     this.name = "ApiError";
@@ -41,6 +42,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
         parsed.data.error.message,
         parsed.data.error.code,
         parsed.data.error.currentRevision,
+        parsed.data.error.currentVersion,
       );
     throw new ApiError(
       response.status,

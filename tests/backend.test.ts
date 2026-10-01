@@ -258,7 +258,7 @@ describe("HTTP input boundaries", () => {
       code: "BODY_TOO_LARGE",
     });
   });
-  it("returns structured validation errors and preserves revision conflicts", async () => {
+  it("returns structured validation errors and preserves document conflicts", async () => {
     const request = new Request("https://planroom.test/api/documents", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -268,14 +268,20 @@ describe("HTTP input boundaries", () => {
       readJson(request, z.object({ title: z.string() })),
     ).rejects.toMatchObject({ status: 400, code: "VALIDATION_ERROR" });
     const response = await api(async () => {
-      throw new AppError(409, "REVISION_CONFLICT", "New revision", 7);
+      throw new AppError(
+        409,
+        "DOCUMENT_CONFLICT",
+        "Updated metadata",
+        undefined,
+        7,
+      );
     });
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({
       error: {
-        code: "REVISION_CONFLICT",
-        message: "New revision",
-        currentRevision: 7,
+        code: "DOCUMENT_CONFLICT",
+        message: "Updated metadata",
+        currentVersion: 7,
       },
     });
   });

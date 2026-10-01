@@ -222,7 +222,8 @@ export default function Dashboard() {
                 <div className="document-card-footer">
                   <div>
                     <span className="revision-caption">
-                      Version {document.currentRevision} · {document.authorName}
+                      HTML-revision {document.currentRevision} ·{" "}
+                      {document.authorName}
                     </span>
                     <br />
                     <time dateTime={document.updatedAt}>

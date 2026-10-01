@@ -39,6 +39,8 @@ export const documentSummarySchema = z.object({
   description: z.string(),
   status: statusSchema,
   githubLinks: githubLinksSchema,
+  githubLinksVersion: revisionNumberSchema,
+  version: revisionNumberSchema,
   currentRevision: revisionNumberSchema,
   authorName: z.string(),
   createdAt: timestampSchema,
@@ -64,6 +66,11 @@ export const revisionDetailSchema = revisionSummarySchema.extend({
   status: statusSchema,
   githubLinks: githubLinksSchema,
 });
+export const documentGitHubLinksSchema = z.object({
+  githubLinks: githubLinksSchema,
+  githubLinksVersion: revisionNumberSchema,
+});
+export type DocumentGitHubLinks = z.infer<typeof documentGitHubLinksSchema>;
 export const commentResponseSchema = z.object({
   id: z.uuid(),
   body: z.string(),
@@ -88,6 +95,7 @@ export const apiErrorBodySchema = z.object({
     code: z.string(),
     message: z.string(),
     currentRevision: revisionNumberSchema.optional(),
+    currentVersion: revisionNumberSchema.optional(),
   }),
 });
 export const userResponseSchema = z.object({ user: userSchema });
@@ -166,18 +174,18 @@ export const documentContentSchema = z.object({
   changeSummary: z.string().trim().min(1).max(1000),
 });
 export const updateDocumentSchema = documentContentSchema.extend({
-  expectedRevision: revisionNumberSchema,
+  expectedVersion: revisionNumberSchema,
 });
 export const updateDocumentStatusSchema = z.strictObject({
-  expectedRevision: revisionNumberSchema,
+  expectedVersion: revisionNumberSchema,
   status: statusSchema,
 });
 export const updateDocumentGitHubLinksSchema = z.strictObject({
-  expectedRevision: revisionNumberSchema,
+  expectedLinksVersion: revisionNumberSchema,
   githubLinks: githubLinksInputSchema,
 });
 export const restoreSchema = z.object({
-  expectedRevision: revisionNumberSchema,
+  expectedVersion: revisionNumberSchema,
   changeSummary: z.string().trim().min(1).max(1000),
 });
 export const commentSchema = z.object({
@@ -194,3 +202,5 @@ export type DocumentStatusUpdate = z.infer<typeof updateDocumentStatusSchema>;
 export type DocumentGitHubLinksUpdate = z.infer<
   typeof updateDocumentGitHubLinksSchema
 >;
+
+export type RestoreInput = z.infer<typeof restoreSchema>;

@@ -10,7 +10,6 @@ import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import {
   ArrowLeft,
   Link2,
-  Download,
   Save,
   Eye,
   Code2,
@@ -25,6 +24,7 @@ import {
   canEditDocumentContent,
   type DocumentContent,
   type DocumentDetail,
+  type DocumentSummary,
 } from "@/contracts";
 import { api, ApiError, errorMessage } from "@/client/api";
 import { formatDate } from "@/client/document-format";
@@ -36,6 +36,7 @@ import {
   DocumentGitHubLinks,
   GitHubReferences,
 } from "@/components/document-github-links";
+import { DocumentHtmlExport } from "@/components/document-export";
 import { DocumentFields, HtmlImport } from "@/components/document-fields";
 import { HtmlViewer } from "@/components/html-viewer";
 import { DocumentComments } from "@/components/document-comments";
@@ -75,6 +76,8 @@ export default function DocumentPage() {
   const [importing, setImporting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [discard, setDiscard] = useState(false);
+  const [githubOpen, setGithubOpen] = useState(false);
+  const [githubBusy, setGithubBusy] = useState(false);
   const dirty =
     document && buffer
       ? buffer.title !== document.title ||
@@ -86,12 +89,10 @@ export default function DocumentPage() {
       : false;
   const conflict =
     serverConflict ??
-    (document &&
-    draft?.modified &&
-    draft.expectedRevision !== document.currentRevision
-      ? document.currentRevision
+    (document && draft?.modified && draft.expectedVersion !== document.version
+      ? document.version
       : null);
-  useDraftProtection(dirty, busy || importing);
+  useDraftProtection(dirty, busy || importing || githubBusy);
   function setBuffer(content: DocumentContent) {
     setDraft((current) =>
       current ? { ...current, content, modified: true } : undefined,
@@ -99,13 +100,22 @@ export default function DocumentPage() {
   }
   const accept = useCallback(
     (next: DocumentDetail, preserveDraft = false) => {
-      setDocument(next);
+      setDocument((current) =>
+        current?.id === next.id &&
+        current.githubLinksVersion > next.githubLinksVersion
+          ? {
+              ...next,
+              githubLinks: current.githubLinks,
+              githubLinksVersion: current.githubLinksVersion,
+            }
+          : next,
+      );
       setDraft((current) =>
         preserveDraft && current?.modified
           ? current
           : {
               content: editable(next),
-              expectedRevision: next.currentRevision,
+              expectedVersion: next.version,
               modified: false,
             },
       );
@@ -173,14 +183,18 @@ export default function DocumentPage() {
         method: "PUT",
         body: JSON.stringify({
           ...parsed.data,
-          expectedRevision: draft?.expectedRevision ?? document.currentRevision,
+          expectedVersion: draft?.expectedVersion ?? document.version,
         }),
       });
       accept(next);
-      setNotice(`Version ${next.currentRevision} har sparats.`);
+      setNotice(
+        next.currentRevision !== document.currentRevision
+          ? `HTML-revision ${next.currentRevision} har sparats.`
+          : "Planens metadata har sparats.",
+      );
     } catch (cause) {
-      if (cause instanceof ApiError && cause.code === "REVISION_CONFLICT")
-        setConflict(cause.currentRevision ?? document.currentRevision + 1);
+      if (cause instanceof ApiError && cause.code === "DOCUMENT_CONFLICT")
+        setConflict(cause.currentVersion ?? document.version + 1);
       else {
         if (cause instanceof ApiError && cause.code === "DOCUMENT_LOCKED")
           await load(undefined, true);
@@ -209,17 +223,16 @@ export default function DocumentPage() {
     );
   }
   function metadataError(cause: unknown) {
-    if (cause instanceof ApiError && cause.code === "REVISION_CONFLICT")
-      setConflict(
-        cause.currentRevision ?? (document?.currentRevision ?? 0) + 1,
-      );
+    if (cause instanceof ApiError && cause.code === "DOCUMENT_CONFLICT")
+      setConflict(cause.currentVersion ?? (document?.version ?? 0) + 1);
     setError(errorMessage(cause));
   }
-  function metadataUpdated(next: DocumentDetail) {
-    accept(next);
+  function metadataUpdated(next: DocumentSummary) {
+    if (!document) return;
+    accept({ ...document, ...next });
     if (tab === "edit" && !canEditDocumentContent(next.status))
       setTab("preview");
-    setNotice(`Version ${next.currentRevision} har sparats.`);
+    setNotice("Status har uppdaterats.");
   }
   if (loading && (!document || document.id !== id))
     return (
@@ -250,7 +263,6 @@ export default function DocumentPage() {
         ]
       : []),
     { value: "instructions", label: "AI-instruktioner", icon: Bot },
-    { value: "github", label: "GitHub", icon: Github },
     { value: "comments", label: "Diskussion", icon: MessageSquare },
     { value: "history", label: "Historik", icon: History },
   ];
@@ -285,27 +297,29 @@ export default function DocumentPage() {
           <h1>{document.title}</h1>
           <p className="muted">{document.description}</p>
           <p className="revision-caption">
-            Version {document.currentRevision} · Uppdaterad{" "}
+            HTML-revision {document.currentRevision} · Uppdaterad{" "}
             {formatDate(document.updatedAt)} av {document.authorName}
           </p>
           <GitHubReferences links={document.githubLinks} />
         </div>
         <div className="button-row">
-          {canWrite && (
-            <Button
-              label="Koppla GitHub"
-              icon={<Github size={16} aria-hidden />}
-              onClick={() => changeTab("github")}
-            />
-          )}
+          <Button
+            label={
+              document.githubLinks.length
+                ? `GitHub (${document.githubLinks.length})`
+                : canWrite
+                  ? "Koppla GitHub"
+                  : "GitHub"
+            }
+            icon={<Github size={16} aria-hidden />}
+            onClick={() => setGithubOpen(true)}
+          />
           <Button
             label="Kopiera länk"
             icon={<Link2 size={16} aria-hidden />}
             onClick={() => void copyLink()}
           />
-          <Link href={`/api/documents/${id}/export`} download isStandalone>
-            <Download size={16} aria-hidden /> Exportera HTML
-          </Link>
+          <DocumentHtmlExport documentId={id} hasDraft={dirty} />
         </div>
       </header>
       {!canEditDocumentContent(document.status) && (
@@ -336,7 +350,7 @@ export default function DocumentPage() {
       {conflict !== null && (
         <Banner
           status="warning"
-          title={`Planeringen har en nyare version (${conflict})`}
+          title="Planeringen har ändrats i en annan session"
           description="Dina ändringar finns kvar i redigeraren. Kopiera dem innan du laddar om, jämför med den nya versionen och gör sedan uppdateringen igen."
           endContent={
             <Button label="Ladda om aktuell version" onClick={reload} />
@@ -426,12 +440,11 @@ export default function DocumentPage() {
             />
             <div className="form-actions">
               <p className="muted">
-                Utgår från version{" "}
-                {draft?.expectedRevision ?? document.currentRevision}. En
-                sparning skapar en ny version.
+                Bara ändrad HTML skapar en ny revision. Metadata sparas i den
+                aktuella planen.
               </p>
               <Button
-                label="Spara ny version"
+                label="Spara ändringar"
                 type="submit"
                 variant="primary"
                 isLoading={busy}
@@ -479,22 +492,40 @@ export default function DocumentPage() {
           behörighet än ditt konto eller din åtkomstnyckel.
         </p>
       </section>
-      <section
-        hidden={activeTab !== "github"}
-        role="tabpanel"
-        id="panel-github"
-        aria-labelledby="tab-github"
-        className="narrow-content"
+      <Dialog
+        isOpen={githubOpen}
+        onOpenChange={(open) => {
+          if (!githubBusy) setGithubOpen(open);
+        }}
+        width={600}
+        maxHeight="85vh"
+        purpose="form"
       >
-        <DocumentGitHubLinks
-          document={document}
-          canWrite={canWrite}
-          isDisabled={dirty || busy || importing || conflict !== null}
-          onUpdated={metadataUpdated}
-          onError={metadataError}
-          onSavingChange={setBusy}
+        <DialogHeader
+          title="GitHub-kopplingar"
+          onOpenChange={(open) => {
+            if (!githubBusy) setGithubOpen(open);
+          }}
         />
-      </section>
+        <div className="dialog-content">
+          {githubOpen && (
+            <DocumentGitHubLinks
+              documentId={id}
+              metadata={document}
+              canWrite={canWrite}
+              onUpdated={(next) =>
+                setDocument((current) =>
+                  current?.id === id &&
+                  next.githubLinksVersion >= current.githubLinksVersion
+                    ? { ...current, ...next }
+                    : current,
+                )
+              }
+              onSavingChange={setGithubBusy}
+            />
+          )}
+        </div>
+      </Dialog>
       <section
         hidden={activeTab !== "comments"}
         role="tabpanel"
@@ -520,7 +551,9 @@ export default function DocumentPage() {
             onRestored={(next) => {
               accept(next);
               setNotice(
-                `Version ${next.currentRevision} skapades genom återställning.`,
+                next.currentRevision !== document.currentRevision
+                  ? `HTML-revision ${next.currentRevision} skapades genom återställning.`
+                  : "Planens metadata har återställts.",
               );
             }}
             onReload={reload}

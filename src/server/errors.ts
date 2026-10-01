@@ -4,6 +4,7 @@ export class AppError extends Error {
     public code: string,
     message: string,
     public currentRevision?: number,
+    public currentVersion?: number,
   ) {
     super(message);
   }

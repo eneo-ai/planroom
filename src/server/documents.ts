@@ -5,6 +5,8 @@ import type {
   DocumentContent,
   DocumentDetail,
   DocumentGitHubLinksUpdate,
+  DocumentGitHubLinks,
+  RestoreInput,
   DocumentStatus,
   DocumentStatusUpdate,
   DocumentSummary,
@@ -37,7 +39,9 @@ interface RevisionRow {
   author_name: string;
   created_at: Date;
 }
-interface DocumentRow extends RevisionRow {
+interface DocumentRow extends Omit<RevisionRow, "created_at"> {
+  version: number;
+  github_links_version: number;
   document_created_at: Date;
   updated_at: Date;
 }
@@ -48,6 +52,8 @@ type SummaryRow = Pick<
   | "description"
   | "status"
   | "github_links"
+  | "version"
+  | "github_links_version"
   | "number"
   | "author_name"
   | "document_created_at"
@@ -57,8 +63,8 @@ type RevisionSummaryRow = Pick<
   RevisionRow,
   "id" | "number" | "title" | "change_summary" | "author_name" | "created_at"
 >;
-const currentSelect = `SELECT r.*, u.name AS author_name, d.created_at AS document_created_at, d.updated_at FROM documents d JOIN document_revisions r ON r.document_id=d.id AND r.number=d.current_revision JOIN users u ON u.id=r.author_id`;
-const summarySelect = `SELECT r.document_id,r.number,r.title,r.description,r.status,r.github_links,u.name AS author_name,d.created_at AS document_created_at,d.updated_at FROM documents d JOIN document_revisions r ON r.document_id=d.id AND r.number=d.current_revision JOIN users u ON u.id=r.author_id`;
+const currentSelect = `SELECT r.id,r.document_id,r.number,r.html,d.title,d.description,d.instructions,d.status,d.change_summary,d.version,d.github_links,d.github_links_version,u.name AS author_name,d.created_at AS document_created_at,d.updated_at FROM documents d JOIN document_revisions r ON r.document_id=d.id AND r.number=d.current_revision JOIN users u ON u.id=d.author_id`;
+const summarySelect = `SELECT d.id AS document_id,d.current_revision AS number,d.title,d.description,d.status,d.version,d.github_links,d.github_links_version,u.name AS author_name,d.created_at AS document_created_at,d.updated_at FROM documents d JOIN users u ON u.id=d.author_id`;
 function summary(row: SummaryRow): DocumentSummary {
   return {
     id: row.document_id,
@@ -66,6 +72,8 @@ function summary(row: SummaryRow): DocumentSummary {
     description: row.description,
     status: row.status,
     githubLinks: row.github_links,
+    githubLinksVersion: row.github_links_version,
+    version: row.version,
     currentRevision: row.number,
     authorName: row.author_name,
     createdAt: row.document_created_at.toISOString(),
@@ -116,7 +124,7 @@ export async function listDocuments(
 ): Promise<DocumentSummary[]> {
   assertReady(principal);
   const result = await db.query<SummaryRow>(
-    `${summarySelect} WHERE ($1::text IS NULL OR r.title ILIKE '%' || $1 || '%' OR r.description ILIKE '%' || $1 || '%') AND ($2::text IS NULL OR r.status=$2) ORDER BY d.updated_at DESC LIMIT 200`,
+    `${summarySelect} WHERE ($1::text IS NULL OR d.title ILIKE '%' || $1 || '%' OR d.description ILIKE '%' || $1 || '%') AND ($2::text IS NULL OR d.status=$2) ORDER BY d.updated_at DESC LIMIT 200`,
     [filters.q ?? null, filters.status ?? null],
   );
   return result.rows.map(summary);
@@ -133,7 +141,8 @@ async function insertRevision(
   author: User,
   id: string,
   number: number,
-  content: DocumentContent & Pick<DocumentDetail, "githubLinks">,
+  content: DocumentContent,
+  githubLinks: string[],
 ): Promise<void> {
   await client.query(
     "INSERT INTO document_revisions(id,document_id,number,title,description,html,instructions,status,change_summary,author_id,github_links) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
@@ -148,7 +157,7 @@ async function insertRevision(
       content.status,
       content.changeSummary,
       author.id,
-      content.githubLinks,
+      githubLinks,
     ],
   );
 }
@@ -173,60 +182,88 @@ export async function createDocumentInTransaction(
 ): Promise<DocumentDetail> {
   const id = randomUUID();
   await client.query(
-    "INSERT INTO documents(id,current_revision) VALUES($1,1)",
-    [id],
+    "INSERT INTO documents(id,current_revision,title,description,instructions,status,change_summary,author_id) VALUES($1,1,$2,$3,$4,$5,$6,$7)",
+    [
+      id,
+      content.title,
+      content.description,
+      content.instructions,
+      content.status,
+      content.changeSummary,
+      author.id,
+    ],
   );
-  await insertRevision(client, author, id, 1, { ...content, githubLinks: [] });
+  await insertRevision(client, author, id, 1, content, []);
   return fetchDocument(client, id);
 }
-async function lockRevision(
+async function lockDocument(
   client: PoolClient,
   id: string,
-  expectedRevision: number,
-): Promise<number> {
-  const result = await client.query<{ current_revision: number }>(
-    "SELECT current_revision FROM documents WHERE id=$1 FOR UPDATE",
+  expectedVersion: number,
+): Promise<void> {
+  const result = await client.query<{ version: number }>(
+    "SELECT version FROM documents WHERE id=$1 FOR UPDATE",
     [id],
   );
   const row = result.rows[0];
   if (!row) notFound();
-  if (row.current_revision !== expectedRevision)
+  if (row.version !== expectedVersion)
     throw new AppError(
       409,
-      "REVISION_CONFLICT",
-      "Planeringen har uppdaterats. Läs den nya versionen innan du sparar.",
-      row.current_revision,
+      "DOCUMENT_CONFLICT",
+      "Planeringen har uppdaterats. Läs den senaste planeringen innan du sparar.",
+      undefined,
+      row.version,
     );
-  return row.current_revision + 1;
 }
-async function advance(
-  client: PoolClient,
-  id: string,
-  number: number,
-): Promise<DocumentDetail> {
-  await client.query(
-    "UPDATE documents SET current_revision=$2,updated_at=now() WHERE id=$1",
-    [id, number],
-  );
-  return fetchDocument(client, id);
-}
-async function writeRevision(
+
+async function writeDocument(
   principal: Principal,
   id: string,
-  expectedRevision: number,
+  expectedVersion: number,
   change: (
     current: DocumentDetail,
     client: PoolClient,
-  ) => Promise<DocumentContent & Pick<DocumentDetail, "githubLinks">>,
+  ) => Promise<DocumentContent>,
 ): Promise<DocumentDetail> {
   assertWrite(principal);
   return transaction(async (client) => {
     const verified = await lockWritePrincipal(client, principal);
-    const next = await lockRevision(client, id, expectedRevision);
+    await lockDocument(client, id, expectedVersion);
     const current = await fetchDocument(client, id);
     const content = await change(current, client);
-    await insertRevision(client, verified.user, id, next, content);
-    return advance(client, id, next);
+    const htmlChanged = content.html !== current.html;
+    const metadataChanged =
+      content.title !== current.title ||
+      content.description !== current.description ||
+      content.instructions !== current.instructions ||
+      content.status !== current.status;
+    // An identical save is not a new edit, even if its summary differs.
+    if (!htmlChanged && !metadataChanged) return current;
+    const number = current.currentRevision + (htmlChanged ? 1 : 0);
+    if (htmlChanged)
+      await insertRevision(
+        client,
+        verified.user,
+        id,
+        number,
+        content,
+        current.githubLinks,
+      );
+    await client.query(
+      "UPDATE documents SET current_revision=$2,title=$3,description=$4,instructions=$5,status=$6,change_summary=$7,author_id=$8,version=version+1,updated_at=now() WHERE id=$1",
+      [
+        id,
+        number,
+        content.title,
+        content.description,
+        content.instructions,
+        content.status,
+        content.changeSummary,
+        verified.user.id,
+      ],
+    );
+    return fetchDocument(client, id);
   });
 }
 
@@ -245,13 +282,13 @@ export async function updateDocument(
   id: string,
   content: DocumentUpdate,
 ): Promise<DocumentDetail> {
-  return writeRevision(
+  return writeDocument(
     principal,
     id,
-    content.expectedRevision,
+    content.expectedVersion,
     async (current) => {
       assertContentEditable(current);
-      return { ...content, githubLinks: current.githubLinks };
+      return content;
     },
   );
 }
@@ -260,34 +297,88 @@ export async function updateDocumentStatus(
   principal: Principal,
   id: string,
   input: DocumentStatusUpdate,
-): Promise<DocumentDetail> {
-  return writeRevision(
-    principal,
-    id,
-    input.expectedRevision,
-    async (current) => ({
-      ...current,
-      status: input.status,
-      changeSummary: `Status: ${documentStatusLabels[current.status]} → ${documentStatusLabels[input.status]}`,
-    }),
-  );
+): Promise<DocumentSummary> {
+  assertWrite(principal);
+  return transaction(async (client) => {
+    const verified = await lockWritePrincipal(client, principal);
+    await lockDocument(client, id, input.expectedVersion);
+    const result = await client.query<SummaryRow>(
+      `${summarySelect} WHERE d.id=$1`,
+      [id],
+    );
+    const current = summary(result.rows[0]);
+    if (current.status === input.status) return current;
+    await client.query(
+      "UPDATE documents SET status=$2,change_summary=$3,author_id=$4,version=version+1,updated_at=now() WHERE id=$1",
+      [
+        id,
+        input.status,
+        `Status: ${documentStatusLabels[current.status]} → ${documentStatusLabels[input.status]}`,
+        verified.user.id,
+      ],
+    );
+    const next = await client.query<SummaryRow>(
+      `${summarySelect} WHERE d.id=$1`,
+      [id],
+    );
+    return summary(next.rows[0]);
+  });
 }
 
+interface GitHubLinksRow {
+  github_links: string[];
+  github_links_version: number;
+}
+function linksDetail(row: GitHubLinksRow): DocumentGitHubLinks {
+  return {
+    githubLinks: row.github_links,
+    githubLinksVersion: row.github_links_version,
+  };
+}
+export async function getDocumentGitHubLinks(
+  principal: Principal,
+  id: string,
+): Promise<DocumentGitHubLinks> {
+  assertReady(principal);
+  const result = await db.query<GitHubLinksRow>(
+    "SELECT github_links,github_links_version FROM documents WHERE id=$1",
+    [id],
+  );
+  return result.rows[0] ? linksDetail(result.rows[0]) : notFound();
+}
 export async function updateDocumentGitHubLinks(
   principal: Principal,
   id: string,
   input: DocumentGitHubLinksUpdate,
-): Promise<DocumentDetail> {
-  return writeRevision(
-    principal,
-    id,
-    input.expectedRevision,
-    async (current) => ({
-      ...current,
-      githubLinks: input.githubLinks,
-      changeSummary: "Uppdaterar GitHub-kopplingar",
-    }),
-  );
+): Promise<DocumentGitHubLinks> {
+  assertWrite(principal);
+  return transaction(async (client) => {
+    await lockWritePrincipal(client, principal);
+    const result = await client.query<GitHubLinksRow>(
+      "SELECT github_links,github_links_version FROM documents WHERE id=$1 FOR UPDATE",
+      [id],
+    );
+    const current = result.rows[0];
+    if (!current) notFound();
+    if (current.github_links_version !== input.expectedLinksVersion)
+      throw new AppError(
+        409,
+        "GITHUB_LINKS_CONFLICT",
+        "GitHub-kopplingarna har ändrats. Hämta de senaste kopplingarna och försök igen.",
+      );
+    if (
+      current.github_links.length === input.githubLinks.length &&
+      current.github_links.every(
+        (url, index) => url === input.githubLinks[index],
+      )
+    )
+      return linksDetail(current);
+    const next = await client.query<GitHubLinksRow>(
+      "UPDATE documents SET github_links=$2,github_links_version=github_links_version+1 WHERE id=$1 RETURNING github_links,github_links_version",
+      [id, input.githubLinks],
+    );
+    return linksDetail(next.rows[0]);
+  });
 }
 export async function listRevisions(
   principal: Principal,
@@ -318,12 +409,12 @@ export async function restoreDocument(
   principal: Principal,
   id: string,
   number: number,
-  input: { expectedRevision: number; changeSummary: string },
+  input: RestoreInput,
 ): Promise<DocumentDetail> {
-  return writeRevision(
+  return writeDocument(
     principal,
     id,
-    input.expectedRevision,
+    input.expectedVersion,
     async (current, client) => {
       assertContentEditable(current);
       const source = (
@@ -339,7 +430,6 @@ export async function restoreDocument(
         html: source.html,
         instructions: source.instructions,
         status: source.status,
-        githubLinks: source.github_links,
         changeSummary: input.changeSummary,
       };
     },

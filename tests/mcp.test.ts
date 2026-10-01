@@ -51,6 +51,7 @@ describe("MCP permissions through the official SDK", () => {
       expect(listing.tools.map((tool) => tool.name)).toEqual([
         "list_documents",
         "read_document",
+        "read_document_github_links",
         "list_revisions",
         "read_revision",
         "read_comments",
@@ -83,7 +84,7 @@ describe("MCP permissions through the official SDK", () => {
       await session.close();
     }
   });
-  it("rejects a write without its revision precondition before any persistence", async () => {
+  it("rejects a write without its document version precondition before any persistence", async () => {
     const session = await connect({ ...principal, scope: "write" });
     try {
       const tools = (await session.client.listTools()).tools;
@@ -111,7 +112,11 @@ describe("MCP permissions through the official SDK", () => {
         "update_document_github_links",
       ]) {
         const tool = listing.tools.find((tool) => tool.name === name);
-        expect(tool?.inputSchema.required).toContain("expectedRevision");
+        expect(tool?.inputSchema.required).toContain(
+          name === "update_document_github_links"
+            ? "expectedLinksVersion"
+            : "expectedVersion",
+        );
         expect(tool?.annotations?.readOnlyHint).toBe(false);
         expect(
           (
@@ -132,7 +137,7 @@ describe("MCP permissions through the official SDK", () => {
             name: "update_document_github_links",
             arguments: {
               id: principal.user.id,
-              expectedRevision: 1,
+              expectedLinksVersion: 1,
               githubLinks: ["javascript:alert(1)"],
             },
           })

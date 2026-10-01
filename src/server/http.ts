@@ -110,6 +110,9 @@ export async function api(
         {
           error: {
             code: error.code,
+            ...(error.currentVersion === undefined
+              ? {}
+              : { currentVersion: error.currentVersion }),
             message: error.message,
             ...(error.currentRevision
               ? { currentRevision: error.currentRevision }

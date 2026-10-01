@@ -27,7 +27,7 @@ globalThis.fetch = async (url, init) => {
     {
       capabilities: { tools: {} },
       instructions:
-        "Read the latest document; preserve HTML and use expectedRevision.",
+        "Read the latest document; preserve HTML and use expectedVersion.",
     },
   );
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -59,14 +59,14 @@ globalThis.fetch = async (url, init) => {
         ],
       };
     if (params.name === "update_document" && writes) {
-      if (params.arguments?.expectedRevision !== revision)
+      if (params.arguments?.expectedVersion !== revision)
         return {
           isError: true,
           content: [
             {
               type: "text",
               text: JSON.stringify({
-                error: { code: "REVISION_CONFLICT", currentRevision: revision },
+                error: { code: "DOCUMENT_CONFLICT", currentVersion: revision },
               }),
             },
           ],
