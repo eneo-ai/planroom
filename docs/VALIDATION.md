@@ -86,3 +86,5 @@ Real PostgreSQL coverage was extended for native canvas snapshots, no-op batches
 SDK configuration is runtime TLDRAW_LICENSE_KEY, with locally served assets and a pinned matching tldraw/assets version. Production license provisioning is an operator prerequisite, not part of code validation. Migration 007 is additive; no user database was modified locally.
 
 The first remote CI run found a JSONB key-order issue in identical canvas batches. Structural equality now ignores object-key ordering while retaining shape-array order, preventing unnecessary revisions after database round trips. All other new canvas integration cases passed in that run; the unchanged-batch integration test is the regression check.
+
+Remote CI [36857732960](https://github.com/eneo-ai/planroom/actions/runs/36857732960) passed for bdf6a4f: all 171 tests including PostgreSQL and MCP drawing, TypeScript, npm audit, the production Docker image, migration/seed and standalone server health/startup. The CI environment cleaned up its disposable database and containers. Browser visual QA and production license provisioning remain separate from these verified checks.
