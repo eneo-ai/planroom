@@ -1,91 +1,25 @@
 "use client";
 
-import { useState } from "react";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { Selector } from "@astryxdesign/core/Selector";
-import { FileInput } from "@astryxdesign/core/FileInput";
 import { statusSchema, type DocumentContent } from "@/contracts";
 import { statusOptions } from "@/client/document-format";
-
-const maxHtmlBytes = 2_000_000;
+import { DocumentFiles } from "./document-files";
 
 export const emptyDocument: DocumentContent = {
   title: "",
   description: "",
-  html: "",
+  files: [],
   instructions: "",
   status: "draft",
   changeSummary: "Första versionen",
 };
 
-export function HtmlImport({
-  onImport,
-  isDisabled = false,
-  onReadingChange,
-}: {
-  onImport: (html: string, filename: string) => void;
-  isDisabled?: boolean;
-  onReadingChange?: (reading: boolean) => void;
-}) {
-  const [error, setError] = useState("");
-  const [file, setFile] = useState<File | null>(null);
-  const [busy, setBusy] = useState(false);
-  async function read(selectedFile: File) {
-    if (busy || isDisabled) return;
-    setError("");
-    if (!/\.html?$/i.test(selectedFile.name)) {
-      setError("Välj en HTML-fil med ändelsen .html eller .htm.");
-      return;
-    }
-    if (selectedFile.size > maxHtmlBytes) {
-      setError("Filen får vara högst 2 MB.");
-      return;
-    }
-    setBusy(true);
-    onReadingChange?.(true);
-    try {
-      const source = await selectedFile.text();
-      if (!source.trim()) throw new Error("HTML-filen är tom.");
-      onImport(source, selectedFile.name.replace(/\.html?$/i, ""));
-      setFile(selectedFile);
-    } catch {
-      setError(
-        "Filen kunde inte läsas. Kontrollera att den innehåller HTML och försök igen.",
-      );
-    } finally {
-      setBusy(false);
-      onReadingChange?.(false);
-    }
-  }
-  return (
-    <FileInput
-      label="Importera HTML-planering"
-      mode="dropzone"
-      value={file}
-      onChange={(files) => {
-        if (busy || isDisabled) return;
-        setError("");
-        const selectedFile = Array.isArray(files) ? files[0] : files;
-        if (selectedFile) void read(selectedFile);
-        else setFile(null);
-      }}
-      accept=".html,.htm"
-      maxSize={maxHtmlBytes}
-      isDisabled={isDisabled || busy}
-      isLoading={busy}
-      placeholder="Dra hit en HTML-fil eller välj fil"
-      description="Layout, CSS och SVG bevaras. En fil, högst 2 MB. Att rensa filvalet ändrar inte importerad HTML."
-      status={error ? { type: "error", message: error } : undefined}
-      width="100%"
-    />
-  );
-}
-
 export function DocumentFields({
   value,
   onChange,
-  showHtml = true,
+  showFiles = true,
   showInstructions = true,
   showStatus = true,
   isDisabled = false,
@@ -93,7 +27,7 @@ export function DocumentFields({
 }: {
   value: DocumentContent;
   onChange: (next: DocumentContent) => void;
-  showHtml?: boolean;
+  showFiles?: boolean;
   showInstructions?: boolean;
   showStatus?: boolean;
   isDisabled?: boolean;
@@ -155,19 +89,12 @@ export function DocumentFields({
           width="100%"
         />
       )}
-      {showHtml && (
-        <TextArea
-          label="HTML-källa"
+      {showFiles && (
+        <DocumentFiles
+          files={value.files}
+          onChange={(files) => change("files", files)}
           isDisabled={isDisabled}
           isReadOnly={isReadOnly}
-          value={value.html}
-          onChange={(next) => change("html", next)}
-          description="Hela dokumentet sparas utan att dess källa ändras. Förhandsvisningen körs separat."
-          className="code-editor"
-          rows={20}
-          hasSpellCheck={false}
-          width="100%"
-          isRequired
         />
       )}
       <TextInput

@@ -94,11 +94,60 @@ describe("MCP permissions through the official SDK", () => {
         arguments: {
           id: principal.user.id,
           title: "Plan",
-          html: "<p>Plan</p>",
+          files: [
+            {
+              id: principal.user.id,
+              name: "plan.md",
+              format: "markdown",
+              content: "# Plan",
+            },
+          ],
           changeSummary: "Change",
         },
       });
       expect(result.isError).toBe(true);
+    } finally {
+      await session.close();
+    }
+  });
+  it("advertises the shared file contract and rejects invalid replacements through the SDK", async () => {
+    const session = await connect({ ...principal, scope: "write" });
+    try {
+      const tool = (await session.client.listTools()).tools.find(
+        (entry) => entry.name === "update_document",
+      );
+      expect(tool?.inputSchema.required).toContain("files");
+      expect(tool?.inputSchema.properties).not.toHaveProperty("html");
+      const file = {
+        id: principal.user.id,
+        name: "plan.md",
+        format: "markdown",
+        content: "# Plan",
+      };
+      for (const files of [
+        [],
+        [{ ...file, name: "plan.html" }],
+        [
+          file,
+          {
+            ...file,
+            id: "223e4567-e89b-42d3-a456-426614174000",
+            name: "PLAN.MD",
+          },
+        ],
+      ]) {
+        const response = await session.client.callTool({
+          name: "update_document",
+          arguments: {
+            id: principal.user.id,
+            title: "Plan",
+            changeSummary: "Change",
+            expectedVersion: 1,
+            files,
+          },
+        });
+        expect(response.isError).toBe(true);
+      }
     } finally {
       await session.close();
     }

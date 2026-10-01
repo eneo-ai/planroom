@@ -1,7 +1,7 @@
 {
   "name": "planroom",
   "version": "0.1.0",
-  "description": "A self-hosted workspace for versioned HTML plans, with REST and MCP APIs.",
+  "description": "A self-hosted workspace for versioned HTML and Markdown plans, with REST and MCP APIs.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -36,6 +36,7 @@
     "@scalar/api-reference-react": "0.9.76",
     "@stylexjs/stylex": "0.19.1",
     "lucide-react": "^0.577.0",
+    "marked": "18.0.14",
     "next": "16.3.7",
     "pg": "8.23.0",
     "react": "19.3.0",

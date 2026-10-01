@@ -9,12 +9,9 @@ import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { ArrowLeft, Plus } from "lucide-react";
 import { documentContentSchema, type DocumentDetail } from "@/contracts";
 import { api, errorMessage } from "@/client/api";
-import {
-  DocumentFields,
-  HtmlImport,
-  emptyDocument,
-} from "@/components/document-fields";
-import { HtmlViewer } from "@/components/html-viewer";
+import { DocumentFields, emptyDocument } from "@/components/document-fields";
+import { PlanningFileImport } from "@/components/document-files";
+import { PlanningFileViewer } from "@/components/planning-file-viewer";
 import { useSession } from "@/components/session";
 import {
   useDocumentDraft,
@@ -36,7 +33,7 @@ export default function NewDocumentPage() {
   const dirty =
     value.title !== emptyDocument.title ||
     value.description !== emptyDocument.description ||
-    value.html !== emptyDocument.html ||
+    JSON.stringify(value.files) !== JSON.stringify(emptyDocument.files) ||
     value.instructions !== emptyDocument.instructions ||
     value.status !== emptyDocument.status ||
     value.changeSummary !== emptyDocument.changeSummary;
@@ -86,7 +83,8 @@ export default function NewDocumentPage() {
           <p className="eyebrow">EN GEMENSAM START</p>
           <h1>Ny planering</h1>
           <p className="muted">
-            Importera er HTML-fil och ge nästa person rätt sammanhang.
+            Importera era HTML- och Markdown-filer och ge nästa person rätt
+            sammanhang.
           </p>
         </div>
       </header>
@@ -98,15 +96,19 @@ export default function NewDocumentPage() {
             description={error}
           />
         )}
-        <HtmlImport
+        <PlanningFileImport
+          files={value.files}
           isDisabled={busy}
           onReadingChange={setImporting}
-          onImport={(html, filename) =>
+          onImport={(files) =>
             setDraft((current) => ({
               content: {
                 ...(current?.content ?? emptyDocument),
-                html,
-                title: current?.content.title || filename,
+                files: [...(current?.content.files ?? []), ...files],
+                title:
+                  current?.content.title ||
+                  files[0]?.name.replace(/\.[^.]+$/, "") ||
+                  "Ny planering",
               },
               expectedVersion: null,
               modified: true,
@@ -140,7 +142,11 @@ export default function NewDocumentPage() {
           id="new-edit-panel"
           aria-labelledby="new-edit-tab"
         >
-          <DocumentFields value={value} onChange={setValue} isDisabled={busy} />
+          <DocumentFields
+            value={value}
+            onChange={setValue}
+            isDisabled={busy || importing}
+          />
         </div>
         <div
           hidden={tab !== "preview"}
@@ -148,18 +154,10 @@ export default function NewDocumentPage() {
           id="new-preview-panel"
           aria-labelledby="new-preview-tab"
         >
-          {value.html ? (
-            <HtmlViewer
-              html={value.html}
-              title={value.title || "Ny planering"}
-            />
-          ) : (
-            <Banner
-              status="info"
-              title="Lägg till HTML först"
-              description="Välj en fil eller klistra in HTML i innehållsfliken för att se planeringen här."
-            />
-          )}
+          <PlanningFileViewer
+            files={value.files}
+            title={value.title || "Ny planering"}
+          />
         </div>
         <div className="form-actions">
           <Button label="Tillbaka till planeringar" href="/" variant="ghost" />

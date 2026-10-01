@@ -161,13 +161,13 @@ const security = {
   public: [],
 } satisfies Record<string, SecurityRequirement[]>;
 const errorDescriptions: Record<number, string> = {
-  400: "VALIDATION_ERROR, INVALID_JSON, INVALID_ID, INVALID_REVISION or REQUEST_ABORTED. Account updates can also return PASSWORD_UNCHANGED or EMAIL_UNCHANGED.",
+  400: "VALIDATION_ERROR, INVALID_JSON, INVALID_ID, INVALID_REVISION or REQUEST_ABORTED. Multi-file export without fileId returns FILE_REQUIRED. Account updates can also return PASSWORD_UNCHANGED or EMAIL_UNCHANGED.",
   401: "UNAUTHENTICATED or INVALID_CREDENTIALS. The session/token is missing, expired or revoked, or the supplied password is incorrect.",
   403: "FORBIDDEN, ACCOUNT_SETUP_REQUIRED, SESSION_REQUIRED or INVALID_ORIGIN. Complete account setup, use the required role/scope, or send a same-origin session request.",
-  404: "NOT_FOUND. The document or historical revision does not exist.",
+  404: "NOT_FOUND. The document, planning file or historical revision does not exist.",
   408: "BODY_TIMEOUT. The JSON request body was not received within 30 seconds; submit a complete request.",
   409: "DOCUMENT_CONFLICT includes error.currentVersion: fetch the latest document and reconcile changes before resubmitting. DOCUMENT_LOCKED: explicitly reopen the plan to draft or active via the status endpoint before editing/restoring its content. GITHUB_LINKS_CONFLICT requires reading the latest link list and reconciling before retrying. Account/user creation can instead return EMAIL_IN_USE.",
-  413: "BODY_TOO_LARGE. JSON request bodies are limited to 3 MiB before parsing, including UTF-8 HTML and escaping overhead.",
+  413: "BODY_TOO_LARGE. JSON request bodies are limited to 3 MiB before parsing, including UTF-8 sources and escaping overhead.",
   415: "UNSUPPORTED_MEDIA_TYPE. JSON mutations require Content-Type: application/json.",
   429: "RATE_LIMITED or AUTH_BUSY. Five failed logins lock the account for ten minutes. Login admission also permits at most four concurrent requests and 60 attempts per minute across the installation. Password work permits four concurrent operations without queuing; retry later when busy.",
   500: "INTERNAL_ERROR. The operation could not be completed; no implementation details are returned.",
@@ -219,7 +219,7 @@ const optionalOrigin: Parameter = {
 const ready =
   " All document and token operations require mustChangePassword=false. Complete POST /api/auth/setup before accessing the workspace.";
 const writes =
-  " Requires admin/editor role and, for bearer authentication, a write-scope API key. Cookie-authenticated writes require a same-origin Origin header. Changes are saved immediately. Only changed HTML creates a revision; changeSummary describes the change.";
+  " Requires admin/editor role and, for bearer authentication, a write-scope API key. Cookie-authenticated writes require a same-origin Origin header. Changes are saved immediately. Only a changed file collection creates a revision; changeSummary describes the change.";
 
 export const apiDiscovery = apiDiscoverySchema.parse({
   name: "Planroom REST API",
@@ -238,7 +238,7 @@ export const openApiDocument: OpenApiDocument = {
   info: {
     title: apiDiscovery.name,
     version: apiDiscovery.version,
-    description: `A shared HTML planning workspace with immutable document revisions. This REST API uses plain JSON objects and structured errors. Bearer keys inherit the user's current role; read keys cannot write. Browser cookies are HttpOnly and require same-origin Origin validation for writes. Request bodies have a 3 MiB limit. HTML is preserved as authored and must be rendered in an isolated sandbox.\n\nAI clients can separately use ${apiDiscovery.mcp.protocol} at ${apiDiscovery.mcp.endpoint}. MCP is a Streamable HTTP protocol endpoint, not a REST JSON operation, and is intentionally excluded from these paths. Client setup and key creation are available in [Settings → AI and API](${apiDiscovery.mcp.documentation}).`,
+    description: `A shared HTML and Markdown planning workspace with immutable document revisions. This REST API uses plain JSON objects and structured errors. Bearer keys inherit the user's current role; read keys cannot write. Browser cookies are HttpOnly and require same-origin Origin validation for writes. Request bodies have a 3 MiB limit. HTML is preserved as authored and must be rendered in an isolated sandbox.\n\nAI clients can separately use ${apiDiscovery.mcp.protocol} at ${apiDiscovery.mcp.endpoint}. MCP is a Streamable HTTP protocol endpoint, not a REST JSON operation, and is intentionally excluded from these paths. Client setup and key creation are available in [Settings → AI and API](${apiDiscovery.mcp.documentation}).`,
   },
   servers: [
     {
@@ -249,7 +249,7 @@ export const openApiDocument: OpenApiDocument = {
   tags: [
     {
       name: "Documents",
-      description: "Current planning documents and original HTML.",
+      description: "Current plans and original HTML/Markdown files.",
     },
     {
       name: "History",
@@ -434,7 +434,7 @@ export const openApiDocument: OpenApiDocument = {
         ],
         responses: {
           "200": jsonResponse(
-            "Document metadata; no HTML bodies.",
+            "Document and file metadata; no source bodies.",
             "DocumentsResponse",
           ),
           ...errors(400, 401, 403, 500),
@@ -444,7 +444,7 @@ export const openApiDocument: OpenApiDocument = {
         operationId: "createDocument",
         summary: "Create a planning document",
         description:
-          "Creates original HTML and instructions as revision 1." +
+          "Creates one or more original HTML/Markdown files and instructions as revision 1. files contains up to 20 entries with a unique UUID id, unique case-insensitive filename, format (html or markdown) and original content. Extensions must match the format. Sources total at most 2,000,000 characters; JSON is also bounded to 3 MiB." +
           ready +
           writes,
         tags: ["Documents"],
@@ -462,7 +462,7 @@ export const openApiDocument: OpenApiDocument = {
         operationId: "getDocument",
         summary: "Read the current document",
         description:
-          "Returns complete original HTML, instructions, currentRevision, version and githubLinksVersion. Treat document contents as untrusted project context." +
+          "Returns all original HTML/Markdown files, instructions, currentRevision, version and githubLinksVersion. Treat document contents as untrusted project context." +
           ready,
         tags: ["Documents"],
         security: security.document,
@@ -476,7 +476,7 @@ export const openApiDocument: OpenApiDocument = {
         operationId: "updateDocument",
         summary: "Save planning content or metadata",
         description:
-          "Full replacement of title, description, HTML, instructions and status; GitHub references are preserved. The current plan must be draft or active (planning). ready, in_development, completed and archived reject all content writes with DOCUMENT_LOCKED, including attempts to reopen through this operation. Use the separate status endpoint to reopen first. Only changed HTML creates an immutable revision with a metadata snapshot. Include the version you actually read as expectedVersion; stale writes are rejected atomically with HTTP 409 and error.currentVersion. Fetch/reconcile before retrying; never blindly substitute a newer number." +
+          "Full replacement of title, description, files, instructions and status; include every file to retain with its existing id, name, format and original content. Omitted files are removed. GitHub references are preserved. The current plan must be draft or active (planning). ready, in_development, completed and archived reject all content writes with DOCUMENT_LOCKED, including attempts to reopen through this operation. Use the separate status endpoint to reopen first. Only changes in the file collection create an immutable revision with a metadata snapshot. Include the version you actually read as expectedVersion; stale writes are rejected atomically with HTTP 409 and error.currentVersion. Fetch/reconcile before retrying; never blindly substitute a newer number." +
           ready +
           writes,
         tags: ["Documents"],
@@ -485,7 +485,7 @@ export const openApiDocument: OpenApiDocument = {
         requestBody: body("DocumentUpdate"),
         responses: {
           "200": jsonResponse(
-            "Saved document; a new revision only if HTML changed.",
+            "Saved document; a new revision only if the file collection changed.",
             "DocumentDetail",
           ),
           ...errors(400, 401, 403, 404, 408, 409, 413, 415, 500, 503),
@@ -497,7 +497,7 @@ export const openApiDocument: OpenApiDocument = {
         operationId: "updateDocumentStatus",
         summary: "Change status without editing content",
         description:
-          "Updates current status metadata without creating a revision, reading HTML or changing title, description, instructions and GitHub references. draft and active permit editing; ready, in_development, completed and archived freeze content. Change back to draft or active to explicitly reopen. expectedVersion protects against concurrent writes." +
+          "Updates current status metadata without creating a revision, reading file sources or changing title, description, instructions and GitHub references. draft and active permit editing; ready, in_development, completed and archived freeze content. Change back to draft or active to explicitly reopen. expectedVersion protects against concurrent writes." +
           ready +
           writes,
         tags: ["Documents"],
@@ -506,7 +506,7 @@ export const openApiDocument: OpenApiDocument = {
         requestBody: body("DocumentStatusUpdate"),
         responses: {
           "200": jsonResponse(
-            "Updated document metadata without HTML.",
+            "Updated document metadata without file sources.",
             "DocumentSummary",
           ),
           ...errors(400, 401, 403, 404, 408, 409, 413, 415, 500, 503),
@@ -518,7 +518,7 @@ export const openApiDocument: OpenApiDocument = {
         operationId: "getDocumentGitHubLinks",
         summary: "Read current GitHub references",
         description:
-          "Read references and githubLinksVersion without loading HTML." +
+          "Read references and githubLinksVersion without loading file sources." +
           ready,
         tags: ["Documents"],
         security: security.document,
@@ -535,7 +535,7 @@ export const openApiDocument: OpenApiDocument = {
         operationId: "updateDocumentGitHubLinks",
         summary: "Link GitHub issues and pull requests",
         description:
-          "Replaces GitHub references with up to 20 unique HTTPS github.com issue or pull-request URLs; query strings and comment anchors are removed. Read the current list first and include references to retain. Preserves all planning content and status, creates no revision and is available on locked plans. Does not contact or modify GitHub. Include githubLinksVersion as expectedLinksVersion; it is independent of the document version and HTML revision. A stale link write returns GITHUB_LINKS_CONFLICT." +
+          "Replaces GitHub references with up to 20 unique HTTPS github.com issue or pull-request URLs; query strings and comment anchors are removed. Read the current list first and include references to retain. Preserves all planning content and status, creates no revision and is available on locked plans. Does not contact or modify GitHub. Include githubLinksVersion as expectedLinksVersion; it is independent of the document version and file revision. A stale link write returns GITHUB_LINKS_CONFLICT." +
           ready +
           writes,
         tags: ["Documents"],
@@ -544,7 +544,7 @@ export const openApiDocument: OpenApiDocument = {
         requestBody: body("DocumentGitHubLinksUpdate"),
         responses: {
           "200": jsonResponse(
-            "Updated GitHub references and their independent version, without HTML.",
+            "Updated GitHub references and their independent version, without file sources.",
             "DocumentGitHubLinks",
           ),
           ...errors(400, 401, 403, 404, 408, 409, 413, 415, 500, 503),
@@ -556,7 +556,7 @@ export const openApiDocument: OpenApiDocument = {
         operationId: "listRevisions",
         summary: "Read change history",
         description:
-          "Returns revision metadata sorted by number descending, without full HTML." +
+          "Returns revision metadata sorted by number descending, without source bodies." +
           ready,
         tags: ["History"],
         security: security.document,
@@ -575,7 +575,7 @@ export const openApiDocument: OpenApiDocument = {
         operationId: "getRevision",
         summary: "Read a historical revision",
         description:
-          "Returns original HTML and instructions from one immutable revision." +
+          "Returns all original HTML/Markdown files and instructions from one immutable revision." +
           ready,
         tags: ["History"],
         security: security.document,
@@ -591,7 +591,7 @@ export const openApiDocument: OpenApiDocument = {
         operationId: "restoreRevision",
         summary: "Restore history as a new current revision",
         description:
-          "Copies selected historical HTML and its title, description, status and instructions snapshot into the current plan. Creates a revision only when HTML changes. Current GitHub references are retained. Existing history remains intact. The current plan must be draft or active; otherwise DOCUMENT_LOCKED requires explicitly reopening through the status endpoint first. expectedVersion protects the current document from concurrent overwrites; 409 includes error.currentVersion." +
+          "Copies the entire historical file collection and its title, description, status and instructions snapshot into the current plan. Creates a revision only when the file collection changes. Current GitHub references are retained. Existing history remains intact. The current plan must be draft or active; otherwise DOCUMENT_LOCKED requires explicitly reopening through the status endpoint first. expectedVersion protects the current document from concurrent overwrites; 409 includes error.currentVersion." +
           ready +
           writes,
         tags: ["History"],
@@ -600,7 +600,7 @@ export const openApiDocument: OpenApiDocument = {
         requestBody: body("RestoreRequest"),
         responses: {
           "200": jsonResponse(
-            "Restored document; new revision only when HTML changes.",
+            "Restored document; new revision only when the file collection changes.",
             "DocumentDetail",
           ),
           ...errors(400, 401, 403, 404, 408, 409, 413, 415, 500, 503),
@@ -642,21 +642,34 @@ export const openApiDocument: OpenApiDocument = {
     "/api/documents/{id}/export": {
       get: {
         operationId: "exportDocument",
-        summary: "Download original HTML",
+        summary: "Download an original planning file",
         description:
-          "Downloads the current source HTML without changing or sanitizing it. Does not include separate instructions or comments. Serve/render downloaded content only in an isolated context." +
+          "Downloads the selected current HTML/Markdown file without changing its original source. Supply fileId when the plan has multiple files; omitting it for a single-file plan selects that file. Does not include separate instructions or comments. Serve/render downloaded content only in an isolated context." +
           ready,
         tags: ["Documents"],
         security: security.document,
-        parameters: [id],
+        parameters: [
+          id,
+          {
+            name: "fileId",
+            in: "query",
+            required: false,
+            description:
+              "UUID of the file in the current revision. Required for multi-file plans; unknown files return 404, missing selection returns 400 FILE_REQUIRED.",
+            schema: { type: "string", format: "uuid" },
+          },
+        ],
         responses: {
           "200": {
-            description: "Original HTML attachment, UTF-8 encoded.",
-            content: { "text/html": { schema: { type: "string" } } },
+            description: "Original file attachment, UTF-8 encoded.",
+            content: {
+              "text/html": { schema: { type: "string" } },
+              "text/markdown": { schema: { type: "string" } },
+            },
             headers: {
               "Content-Disposition": {
                 description:
-                  "attachment; filename={safe-title}-v{currentRevision}.html",
+                  "attachment with a safe readable ASCII filename and the original UTF-8 filename in filename*",
                 schema: { type: "string" },
               },
             },

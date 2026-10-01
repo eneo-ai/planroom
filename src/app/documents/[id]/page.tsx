@@ -36,9 +36,9 @@ import {
   DocumentGitHubLinks,
   GitHubReferences,
 } from "@/components/document-github-links";
-import { DocumentHtmlExport } from "@/components/document-export";
-import { DocumentFields, HtmlImport } from "@/components/document-fields";
-import { HtmlViewer } from "@/components/html-viewer";
+import { DocumentFields } from "@/components/document-fields";
+import { PlanningFileImport } from "@/components/document-files";
+import { PlanningFileViewer } from "@/components/planning-file-viewer";
 import { DocumentComments } from "@/components/document-comments";
 import { DocumentHistory } from "@/components/document-history";
 import { useSession } from "@/components/session";
@@ -51,7 +51,7 @@ function editable(document: DocumentDetail): DocumentContent {
   return {
     title: document.title,
     description: document.description,
-    html: document.html,
+    files: document.files,
     instructions: document.instructions,
     status: document.status,
     changeSummary: "",
@@ -82,7 +82,7 @@ export default function DocumentPage() {
     document && buffer
       ? buffer.title !== document.title ||
         buffer.description !== document.description ||
-        buffer.html !== document.html ||
+        JSON.stringify(buffer.files) !== JSON.stringify(document.files) ||
         buffer.instructions !== document.instructions ||
         buffer.status !== document.status ||
         buffer.changeSummary !== ""
@@ -189,7 +189,7 @@ export default function DocumentPage() {
       accept(next);
       setNotice(
         next.currentRevision !== document.currentRevision
-          ? `HTML-revision ${next.currentRevision} har sparats.`
+          ? `Filrevision ${next.currentRevision} har sparats.`
           : "Planens metadata har sparats.",
       );
     } catch (cause) {
@@ -229,7 +229,7 @@ export default function DocumentPage() {
   }
   function metadataUpdated(next: DocumentSummary) {
     if (!document) return;
-    accept({ ...document, ...next });
+    accept({ ...document, ...next, files: document.files });
     if (tab === "edit" && !canEditDocumentContent(next.status))
       setTab("preview");
     setNotice("Status har uppdaterats.");
@@ -297,7 +297,7 @@ export default function DocumentPage() {
           <h1>{document.title}</h1>
           <p className="muted">{document.description}</p>
           <p className="revision-caption">
-            HTML-revision {document.currentRevision} · Uppdaterad{" "}
+            Filrevision {document.currentRevision} · Uppdaterad{" "}
             {formatDate(document.updatedAt)} av {document.authorName}
           </p>
           <GitHubReferences links={document.githubLinks} />
@@ -319,7 +319,6 @@ export default function DocumentPage() {
             icon={<Link2 size={16} aria-hidden />}
             onClick={() => void copyLink()}
           />
-          <DocumentHtmlExport documentId={id} hasDraft={dirty} />
         </div>
       </header>
       {!canEditDocumentContent(document.status) && (
@@ -327,7 +326,7 @@ export default function DocumentPage() {
           status="info"
           title="Planen är låst för innehållsändringar"
           icon={<LockKeyhole size={18} aria-hidden />}
-          description="HTML, titel, beskrivning och AI-instruktioner är låsta. Byt status till Utkast eller Aktiv planering för att lägga till mer. Diskussion och GitHub-kopplingar är fortfarande tillgängliga."
+          description="Planeringsfiler, titel, beskrivning och AI-instruktioner är låsta. Byt status till Utkast eller Aktiv planering för att lägga till mer. Diskussion och GitHub-kopplingar är fortfarande tillgängliga."
         />
       )}
       {error && (
@@ -393,9 +392,11 @@ export default function DocumentPage() {
         id="panel-preview"
         aria-labelledby="tab-preview"
       >
-        <HtmlViewer
+        <PlanningFileViewer
           key={document.currentRevision}
-          html={document.html}
+          files={document.files}
+          documentId={document.id}
+          hasDraft={dirty}
           title={document.title}
         />
       </section>
@@ -415,15 +416,19 @@ export default function DocumentPage() {
               />
             )}
             {canEdit && (
-              <HtmlImport
+              <PlanningFileImport
+                files={buffer.files}
                 isDisabled={busy}
                 onReadingChange={setImporting}
-                onImport={(html) =>
+                onImport={(files) =>
                   setDraft((current) =>
                     current
                       ? {
                           ...current,
-                          content: { ...current.content, html },
+                          content: {
+                            ...current.content,
+                            files: [...current.content.files, ...files],
+                          },
                           modified: true,
                         }
                       : undefined,
@@ -434,14 +439,14 @@ export default function DocumentPage() {
             <DocumentFields
               value={buffer}
               onChange={setBuffer}
-              isDisabled={busy}
+              isDisabled={busy || importing}
               isReadOnly={!canEdit}
               showStatus={false}
             />
             <div className="form-actions">
               <p className="muted">
-                Bara ändrad HTML skapar en ny revision. Metadata sparas i den
-                aktuella planen.
+                Ändringar i fillistan skapar en ny revision. Metadata sparas i
+                den aktuella planen.
               </p>
               <Button
                 label="Spara ändringar"
@@ -455,8 +460,8 @@ export default function DocumentPage() {
               />
             </div>
             <h2>Förhandsvisning av dina ändringar</h2>
-            <HtmlViewer
-              html={buffer.html}
+            <PlanningFileViewer
+              files={buffer.files}
               title={buffer.title || "Osparad planering"}
             />
           </form>
@@ -473,7 +478,7 @@ export default function DocumentPage() {
           <h2>Rätt sammanhang för nästa steg</h2>
           <p className="muted">
             AI-klienten läser dessa instruktioner tillsammans med den aktuella
-            HTML-versionen via MCP.
+            fillistan via MCP.
           </p>
         </div>
         <div className="instructions-content preserve-lines">
@@ -552,7 +557,7 @@ export default function DocumentPage() {
               accept(next);
               setNotice(
                 next.currentRevision !== document.currentRevision
-                  ? `HTML-revision ${next.currentRevision} skapades genom återställning.`
+                  ? `Filrevision ${next.currentRevision} skapades genom återställning.`
                   : "Planens metadata har återställts.",
               );
             }}
@@ -573,7 +578,7 @@ export default function DocumentPage() {
         <div className="dialog-content">
           <p>
             Redigeraren ersätts med den senaste sparade versionen. Kopiera din
-            HTML och dina instruktioner först om du vill behålla dem.
+            filer och dina instruktioner först om du vill behålla dem.
           </p>
           <div className="button-row">
             <Button

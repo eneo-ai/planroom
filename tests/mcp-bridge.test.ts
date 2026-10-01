@@ -5,6 +5,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import { planningFilesSchema } from "../src/contracts";
 
 const script = fileURLToPath(
   new URL("../scripts/mcp-stdio.mjs", import.meta.url),
@@ -49,21 +50,41 @@ describe("Claude Desktop stdio bridge", () => {
         (await bridge.client.listTools()).tools.map((tool) => tool.name),
       ).toEqual(["read_document", "update_document"]);
       const document = z.object({
-        html: z.string(),
+        files: planningFilesSchema,
         currentRevision: z.number(),
       });
       expect(
         document.parse(
           resultJson(await bridge.client.callTool({ name: "read_document" })),
         ),
-      ).toEqual({ html: "<h1>Original visual plan</h1>", currentRevision: 1 });
+      ).toEqual({
+        files: [
+          {
+            id: "123e4567-e89b-42d3-a456-426614174000",
+            name: "plan.html",
+            format: "html",
+            content: "<h1>Original visual plan</h1>",
+          },
+        ],
+        currentRevision: 1,
+      });
       const update = {
         name: "update_document",
-        arguments: { html: "<svg>Updated plan</svg>", expectedVersion: 1 },
+        arguments: {
+          files: [
+            {
+              id: "123e4567-e89b-42d3-a456-426614174000",
+              name: "plan.md",
+              format: "markdown",
+              content: "# Updated plan",
+            },
+          ],
+          expectedVersion: 1,
+        },
       };
       expect(
         document.parse(resultJson(await bridge.client.callTool(update))),
-      ).toEqual({ html: "<svg>Updated plan</svg>", currentRevision: 2 });
+      ).toEqual({ files: update.arguments.files, currentRevision: 2 });
       const stale = await bridge.client.callTool(update);
       expect(stale.isError).toBe(true);
       expect(resultJson(stale)).toEqual({
@@ -85,7 +106,17 @@ describe("Claude Desktop stdio bridge", () => {
         (
           await bridge.client.callTool({
             name: "update_document",
-            arguments: { expectedVersion: 1, html: "<p>No write</p>" },
+            arguments: {
+              expectedVersion: 1,
+              files: [
+                {
+                  id: "123e4567-e89b-42d3-a456-426614174000",
+                  name: "plan.md",
+                  format: "markdown",
+                  content: "# No write",
+                },
+              ],
+            },
           })
         ).isError,
       ).toBe(true);

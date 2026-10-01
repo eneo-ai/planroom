@@ -79,8 +79,9 @@ export default function Dashboard() {
         <div>
           <h2>En planering som följer med arbetet</h2>
           <p>
-            Behåll era HTML-visualiseringar och dela en länk. Instruktioner,
-            diskussion och tidigare versioner finns precis intill.
+            Samla HTML-visualiseringar och Markdown-filer och dela en länk.
+            Instruktioner, diskussion och tidigare versioner finns precis
+            intill.
           </p>
         </div>
       </section>
@@ -153,7 +154,7 @@ export default function Dashboard() {
             description={
               query || status
                 ? "Prova en annan sökning eller välj alla statusar."
-                : "Importera en HTML-fil eller börja med en tom planering. Dela sedan samma länk med hela teamet."
+                : "Importera HTML- och Markdown-filer eller börja med en tom planering. Dela sedan samma länk med hela teamet."
             }
             actions={
               user?.role !== "viewer" &&
@@ -222,11 +223,23 @@ export default function Dashboard() {
                     {document.description || "Ingen beskrivning ännu."}
                   </p>
                 </div>
+                <p className="fine-print">
+                  {document.files.length}{" "}
+                  {document.files.length === 1 ? "fil" : "filer"} ·{" "}
+                  {Array.from(
+                    new Set(
+                      document.files.map((file) =>
+                        file.format === "html" ? "HTML" : "Markdown",
+                      ),
+                    ),
+                  ).join(" + ")}
+                </p>
                 <GitHubReferences links={document.githubLinks} />
                 <div className="document-card-footer">
                   <div className="document-card-meta">
                     <span>
-                      {document.authorName} · HTML v{document.currentRevision}
+                      {document.authorName} · Filrevision{" "}
+                      {document.currentRevision}
                     </span>
                     <time dateTime={document.updatedAt}>
                       {formatDate(document.updatedAt)}

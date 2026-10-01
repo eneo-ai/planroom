@@ -8,7 +8,14 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 let revision = 1;
-let html = "<h1>Original visual plan</h1>";
+let files = [
+  {
+    id: "123e4567-e89b-42d3-a456-426614174000",
+    name: "plan.html",
+    format: "html",
+    content: "<h1>Original visual plan</h1>",
+  },
+];
 globalThis.fetch = async (url, init) => {
   const request = new Request(url, init);
   if (
@@ -27,14 +34,14 @@ globalThis.fetch = async (url, init) => {
     {
       capabilities: { tools: {} },
       instructions:
-        "Read the latest document; preserve HTML and use expectedVersion.",
+        "Read the latest document; preserve HTML/Markdown files and use expectedVersion.",
     },
   );
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [
       {
         name: "read_document",
-        description: "Read original HTML",
+        description: "Read original HTML/Markdown files",
         inputSchema: { type: "object", properties: {} },
       },
       ...(writes
@@ -54,7 +61,7 @@ globalThis.fetch = async (url, init) => {
         content: [
           {
             type: "text",
-            text: JSON.stringify({ html, currentRevision: revision }),
+            text: JSON.stringify({ files, currentRevision: revision }),
           },
         ],
       };
@@ -71,13 +78,13 @@ globalThis.fetch = async (url, init) => {
             },
           ],
         };
-      html = String(params.arguments.html);
+      files = params.arguments.files;
       revision++;
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify({ html, currentRevision: revision }),
+            text: JSON.stringify({ files, currentRevision: revision }),
           },
         ],
       };

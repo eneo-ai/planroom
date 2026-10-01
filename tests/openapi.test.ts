@@ -67,9 +67,22 @@ describe("published REST API contracts", () => {
     });
     expect(schemas.DocumentContent.required).toEqual([
       "title",
-      "html",
+      "files",
       "changeSummary",
     ]);
+    expect(schemas.DocumentContent.properties?.files).toMatchObject({
+      type: "array",
+      minItems: 1,
+      maxItems: 20,
+      items: {
+        required: ["id", "name", "format", "content"],
+        properties: {
+          id: { format: "uuid" },
+          format: { enum: ["html", "markdown"] },
+          content: { minLength: 1, maxLength: 2_000_000 },
+        },
+      },
+    });
     expect(schemas.DocumentContent.properties?.status).toMatchObject({
       enum: [
         "draft",
@@ -151,7 +164,14 @@ describe("published REST API contracts", () => {
       authorName: user.name,
       createdAt: "2026-09-30T10:00:00.000Z",
       updatedAt: "2026-09-30T10:00:00.000Z",
-      html: "<svg>Diagram</svg>",
+      files: [
+        {
+          id: user.id,
+          name: "plan.html",
+          format: "html",
+          content: "<svg>Diagram</svg>",
+        },
+      ],
       instructions: "Preserve diagram",
       changeSummary: "Initial",
     };
@@ -159,7 +179,9 @@ describe("published REST API contracts", () => {
     expect(sessionResponseSchema.parse({ user: null })).toEqual({ user: null });
     expect(
       documentsResponseSchema.parse({ documents: [document] }).documents[0],
-    ).not.toHaveProperty("html");
+    ).toHaveProperty("files", [
+      { id: user.id, name: "plan.html", format: "html" },
+    ]);
     expect(documentDetailSchema.parse(document)).toEqual(document);
     expect(
       apiErrorBodySchema.parse({
@@ -228,6 +250,18 @@ describe("published REST API contracts", () => {
       "200"
     ];
     expect(exported.content?.["text/html"].schema).toEqual({ type: "string" });
+    expect(exported.content?.["text/markdown"].schema).toEqual({
+      type: "string",
+    });
+    expect(
+      operation("/api/documents/{id}/export", "get").parameters,
+    ).toContainEqual(
+      expect.objectContaining({
+        name: "fileId",
+        in: "query",
+        schema: { type: "string", format: "uuid" },
+      }),
+    );
     expect(exported.headers?.["Content-Disposition"].description).toContain(
       "attachment",
     );

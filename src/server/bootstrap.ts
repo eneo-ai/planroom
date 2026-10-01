@@ -45,7 +45,14 @@ export async function seedBootstrap(): Promise<void> {
         documentContentSchema.parse({
           title: "Lansering av en kundportal",
           description: "Exempel på en visuell HTML-planering.",
-          html,
+          files: [
+            {
+              id: randomUUID(),
+              name: "planning-demo.html",
+              format: "html",
+              content: html,
+            },
+          ],
           instructions:
             "Bevara planeringens diagram, layout och interaktivitet. Läs senaste versionen före ändringar och beskriv vad som uppdaterats. Detta är ett syntetiskt exempel utan riktiga kund- eller projektuppgifter.",
           status: "draft",

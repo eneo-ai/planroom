@@ -24,6 +24,80 @@ export function canEditDocumentContent(status: DocumentStatus): boolean {
   return status === "draft" || status === "active";
 }
 export const revisionNumberSchema = z.number().int().positive().max(2147483647);
+export const maxPlanningFiles = 20;
+export const maxPlanningSourceLength = 2_000_000;
+export const planningFileFormatSchema = z.enum(["html", "markdown"]);
+export function planningFileFormat(name: string): PlanningFileFormat | null {
+  if (/\.html?$/i.test(name)) return "html";
+  if (/\.(md|markdown)$/i.test(name)) return "markdown";
+  return null;
+}
+// PostgreSQL JSONB cannot preserve NUL or malformed Unicode. Reject rather than
+// replacing characters or discovering this only after starting a write.
+const planningFileTextSchema = z
+  .string()
+  .refine(
+    (value) => value.isWellFormed() && !value.includes("\0"),
+    "Filens text måste vara giltig Unicode utan nolltecken.",
+  );
+export const planningFileSummarySchema = z.object({
+  id: z.uuid(),
+  name: planningFileTextSchema
+    .min(1)
+    .max(200)
+    .regex(/^[^/\\\x00-\x1f\x7f]+$/),
+  format: planningFileFormatSchema,
+});
+export const planningFileSchema = planningFileSummarySchema
+  .extend({
+    content: planningFileTextSchema.min(1).max(maxPlanningSourceLength),
+  })
+  .superRefine((file, context) => {
+    if (planningFileFormat(file.name) !== file.format)
+      context.addIssue({
+        code: "custom",
+        path: ["name"],
+        message:
+          "Filnamnet måste sluta med .html/.htm för HTML eller .md/.markdown för Markdown.",
+      });
+  });
+export const planningFilesSchema = z
+  .array(planningFileSchema)
+  .min(1, "Lägg till minst en HTML- eller Markdown-fil.")
+  .max(maxPlanningFiles)
+  .superRefine((files, context) => {
+    if (
+      files.reduce((length, file) => length + file.content.length, 0) >
+      maxPlanningSourceLength
+    )
+      context.addIssue({
+        code: "custom",
+        message: "Filernas källor får tillsammans vara högst 2 000 000 tecken.",
+      });
+    const ids = new Set<string>();
+    const names = new Set<string>();
+    files.forEach((file, index) => {
+      const id = file.id.toLowerCase();
+      if (ids.has(id))
+        context.addIssue({
+          code: "custom",
+          path: [index, "id"],
+          message: "Varje fil måste ha ett eget id.",
+        });
+      const name = file.name.toLowerCase();
+      if (names.has(name))
+        context.addIssue({
+          code: "custom",
+          path: [index, "name"],
+          message: "Varje fil måste ha ett eget filnamn.",
+        });
+      ids.add(id);
+      names.add(name);
+    });
+  });
+export type PlanningFileFormat = z.infer<typeof planningFileFormatSchema>;
+export type PlanningFile = z.infer<typeof planningFileSchema>;
+export type PlanningFileSummary = z.infer<typeof planningFileSummarySchema>;
 export const tokenScopeSchema = z.enum(["read", "write"]);
 const timestampSchema = z.iso.datetime();
 export const userSchema = z.object({
@@ -39,6 +113,7 @@ export const documentSummarySchema = z.object({
   description: z.string(),
   status: statusSchema,
   githubLinks: githubLinksSchema,
+  files: z.array(planningFileSummarySchema),
   githubLinksVersion: revisionNumberSchema,
   version: revisionNumberSchema,
   currentRevision: revisionNumberSchema,
@@ -47,7 +122,7 @@ export const documentSummarySchema = z.object({
   updatedAt: timestampSchema,
 });
 export const documentDetailSchema = documentSummarySchema.extend({
-  html: z.string(),
+  files: z.array(planningFileSchema),
   instructions: z.string(),
   changeSummary: z.string(),
 });
@@ -61,7 +136,7 @@ export const revisionSummarySchema = z.object({
 });
 export const revisionDetailSchema = revisionSummarySchema.extend({
   description: z.string(),
-  html: z.string(),
+  files: z.array(planningFileSchema),
   instructions: z.string(),
   status: statusSchema,
   githubLinks: githubLinksSchema,
@@ -168,7 +243,7 @@ export const createUserSchema = z.object({
 export const documentContentSchema = z.object({
   title: z.string().trim().min(1).max(200),
   description: z.string().trim().max(2000).default(""),
-  html: z.string().min(1).max(2_000_000),
+  files: planningFilesSchema,
   instructions: z.string().max(100_000).default(""),
   status: statusSchema.default("draft"),
   changeSummary: z.string().trim().min(1).max(1000),

@@ -281,7 +281,7 @@ select {
   min-width: 0;
   flex: 1;
 }
-.html-export-action {
+.file-export-action {
   display: grid;
   gap: 6px;
   max-width: 260px;

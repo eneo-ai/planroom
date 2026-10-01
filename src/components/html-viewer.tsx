@@ -15,7 +15,15 @@ import {
 import { htmlPreview, htmlPreviewConsent } from "@/client/html-preview";
 import styles from "./html-viewer.module.css";
 
-export function HtmlViewer({ html, title }: { html: string; title: string }) {
+export function HtmlViewer({
+  html,
+  title,
+  allowInteractivity = true,
+}: {
+  html: string;
+  title: string;
+  allowInteractivity?: boolean;
+}) {
   const [consent, dispatchConsent] = useReducer(htmlPreviewConsent, {
     source: html,
     mode: "protected",
@@ -24,8 +32,14 @@ export function HtmlViewer({ html, title }: { html: string; title: string }) {
   // the confirmation dialog is open. Delayed actions for old sources are ignored.
   if (consent.source !== html)
     dispatchConsent({ type: "source-changed", source: html });
-  const interactive = consent.source === html && consent.mode === "interactive";
-  const confirm = consent.source === html && consent.mode === "confirming";
+  const interactive =
+    allowInteractivity &&
+    consent.source === html &&
+    consent.mode === "interactive";
+  const confirm =
+    allowInteractivity &&
+    consent.source === html &&
+    consent.mode === "confirming";
   function closeConfirmation(open: boolean) {
     if (!open) dispatchConsent({ type: "dismiss", source: html });
   }
@@ -56,20 +70,22 @@ export function HtmlViewer({ html, title }: { html: string; title: string }) {
         }
         onClick={() => setCompact(!compact)}
       />
-      <Button
-        label={
-          interactive ? "Stäng av interaktivitet" : "Aktivera interaktivitet"
-        }
-        size="sm"
-        variant="secondary"
-        icon={<Play size={14} aria-hidden />}
-        onClick={() =>
-          dispatchConsent({
-            type: interactive ? "disable" : "request",
-            source: html,
-          })
-        }
-      />
+      {allowInteractivity && (
+        <Button
+          label={
+            interactive ? "Stäng av interaktivitet" : "Aktivera interaktivitet"
+          }
+          size="sm"
+          variant="secondary"
+          icon={<Play size={14} aria-hidden />}
+          onClick={() =>
+            dispatchConsent({
+              type: interactive ? "disable" : "request",
+              source: html,
+            })
+          }
+        />
+      )}
     </div>
   );
   const frame = (
@@ -148,38 +164,40 @@ export function HtmlViewer({ html, title }: { html: string; title: string }) {
           )}
         </div>
       </Dialog>
-      <Dialog
-        isOpen={confirm}
-        onOpenChange={closeConfirmation}
-        purpose="form"
-        width={520}
-      >
-        <DialogHeader
-          title="Aktivera dokumentets JavaScript?"
+      {allowInteractivity && (
+        <Dialog
+          isOpen={confirm}
           onOpenChange={closeConfirmation}
-        />
-        <div className="dialog-content">
-          <Banner
-            status="warning"
-            title="Aktivera endast för dokument du litar på"
-            description="Skript kan skicka data externt, bland annat genom att navigera visningsramen till andra webbplatser. Dokumentet får inte tillgång till Planrooms inloggning eller sidinnehåll."
+          purpose="form"
+          width={520}
+        >
+          <DialogHeader
+            title="Aktivera dokumentets JavaScript?"
+            onOpenChange={closeConfirmation}
           />
-          <p>
-            Valet gäller den här visningen. HTML, CSS och diagram visas även med
-            skripten avstängda.
-          </p>
-          <div className="button-row">
-            <Button label="Avbryt" onClick={() => closeConfirmation(false)} />
-            <Button
-              label="Aktivera interaktivitet"
-              variant="primary"
-              onClick={() => {
-                dispatchConsent({ type: "approve", source: html });
-              }}
+          <div className="dialog-content">
+            <Banner
+              status="warning"
+              title="Aktivera endast för dokument du litar på"
+              description="Skript kan skicka data externt, bland annat genom att navigera visningsramen till andra webbplatser. Dokumentet får inte tillgång till Planrooms inloggning eller sidinnehåll."
             />
+            <p>
+              Valet gäller den här visningen. HTML, CSS och diagram visas även
+              med skripten avstängda.
+            </p>
+            <div className="button-row">
+              <Button label="Avbryt" onClick={() => closeConfirmation(false)} />
+              <Button
+                label="Aktivera interaktivitet"
+                variant="primary"
+                onClick={() => {
+                  dispatchConsent({ type: "approve", source: html });
+                }}
+              />
+            </div>
           </div>
-        </div>
-      </Dialog>
+        </Dialog>
+      )}
     </div>
   );
 }

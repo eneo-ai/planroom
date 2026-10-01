@@ -4,7 +4,7 @@
 
 # Planroom
 
-**Shared HTML planning, with revision history and AI access.**
+**Shared HTML and Markdown planning, with revision history and AI access.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -23,10 +23,10 @@ Developed for shared planning at **Sundsvalls kommun**, Sweden. The repository i
 
 ## ✨ What it does
 
-- Imports and preserves original HTML, CSS and inline SVG.
+- Combines HTML and Markdown files on one planning card, preserving original sources, CSS and inline SVG.
 - Stores immutable HTML revisions with a metadata snapshot; status, instructions and GitHub references can change without duplicating HTML.
 - Rejects stale updates so concurrent work cannot silently overwrite newer content.
-- Provides comments, historical previews, restoration and original HTML export.
+- Provides comments, historical previews, restoration and original HTML/Markdown file export.
 - Includes administrator, editor and viewer accounts, plus scoped personal API keys.
 - Exposes REST with a public OpenAPI reference, and MCP for connected AI clients.
 
@@ -68,7 +68,7 @@ docker compose down
 
 ## 🗂️ Planning together
 
-Import HTML or paste its source, add instructions for continued work, and share the document link in your team chat. The recipient signs in to the same Planroom installation. A saved update includes a change summary and the document version it was based on. Only changed HTML creates a revision.
+Import one or more HTML/Markdown files, or create files and paste their sources, add instructions for continued work, and share the document link in your team chat. The recipient signs in to the same Planroom installation. A saved update includes a change summary and the document version it was based on. Only changed HTML creates a revision.
 
 If someone saved first, reconcile the newer version before retrying. History stays intact, and restoration creates a new revision when HTML changes. Unsaved drafts survive navigation within the same browser tab, but disappear on reload or logout. Save changes for durable storage.
 
@@ -101,7 +101,7 @@ An AI should read the current document and its instructions before writing, and 
 
 ## 🔒 Limits and security boundaries
 
-HTML is stored without destructive sanitization and displayed in an isolated iframe, never the app's own DOM. CSS and SVG work without scripts. JavaScript is **off by default** and can be enabled explicitly for trusted demonstrations. The preview restricts external resources, forms and common network calls; it cannot guarantee that enabled scripts will not transmit data through frame navigation. Downloaded HTML no longer has Planroom's preview restrictions.
+HTML and Markdown sources are stored without destructive sanitization and displayed in an isolated iframe, never the app's own DOM. CSS and SVG work without scripts. JavaScript is **off by default** and can be enabled explicitly for trusted demonstrations. The preview restricts external resources, forms and common network calls; it cannot guarantee that enabled scripts will not transmit data through frame navigation. Markdown supports headings, tables, checklists and code blocks; embedded HTML is shown as text and scripts stay disabled. Downloaded files preserve their original source; downloaded HTML no longer has Planroom's preview restrictions.
 
 Use **Expandera** to view a plan in a fullscreen dialog and close it with the visible button or Escape. Display-mode changes reset temporary demo controls. Script approval applies to the current source and is discarded when that source changes.
 

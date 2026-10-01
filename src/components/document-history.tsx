@@ -15,7 +15,7 @@ import type {
 import { api, errorMessage } from "@/client/api";
 import { formatDate, statuses } from "@/client/document-format";
 import { GitHubReferences } from "./document-github-links";
-import { HtmlViewer } from "./html-viewer";
+import { PlanningFileViewer } from "./planning-file-viewer";
 
 export function DocumentHistory({
   document,
@@ -99,9 +99,9 @@ export function DocumentHistory({
       <div>
         <h2>Varje steg finns kvar</h2>
         <p className="muted">
-          Ändrad HTML skapar en ny revision med titel, status, beskrivning och
-          instruktioner som ögonblicksbild. Metadataändringar skapar inga
-          revisioner.
+          En ändrad fillista skapar en ny revision med titel, status,
+          beskrivning och instruktioner som ögonblicksbild. Metadataändringar
+          skapar inga revisioner.
         </p>
       </div>
       {error && (
@@ -186,9 +186,9 @@ export function DocumentHistory({
           </header>
           <p>{selected.description}</p>
           <GitHubReferences links={selected.githubLinks} />
-          <HtmlViewer
+          <PlanningFileViewer
             key={selected.number}
-            html={selected.html}
+            files={selected.files}
             title={`${selected.title} · version ${selected.number}`}
           />
           <TextArea
@@ -212,9 +212,9 @@ export function DocumentHistory({
         />
         <div className="dialog-content">
           <p>
-            HTML, titel, status, beskrivning och AI-instruktioner från den här
-            versionen blir aktuella. Kommentarer och aktuella GitHub-kopplingar
-            behålls.
+            Alla filer, titel, status, beskrivning och AI-instruktioner från den
+            här versionen blir aktuella. Kommentarer och aktuella
+            GitHub-kopplingar behålls.
           </p>
           {error && (
             <Banner

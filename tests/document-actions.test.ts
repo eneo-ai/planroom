@@ -2,7 +2,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { parseFragment, type DefaultTreeAdapterMap } from "parse5";
 import { describe, expect, it } from "vitest";
-import { DocumentHtmlExport } from "../src/components/document-export";
+import { DocumentFileExport } from "../src/components/document-export";
 import {
   GitHubReferences,
   DocumentGitHubLinks,
@@ -29,22 +29,26 @@ const links = [
 ];
 
 describe("planning action semantics", () => {
-  it("exports via a native download link and clearly identifies saved HTML when a draft exists", () => {
+  it("exports via a native download link and clearly identifies saved file when a draft exists", () => {
     const markup = renderToStaticMarkup(
-      React.createElement(DocumentHtmlExport, {
+      React.createElement(DocumentFileExport, {
         documentId: "test-document",
+        file: { id: "test-file", name: "plan.html", format: "html" },
         hasDraft: true,
       }),
     );
     const [link] = anchors(parseFragment(markup));
-    expect(attribute(link, "href")).toBe("/api/documents/test-document/export");
+    expect(attribute(link, "href")).toBe(
+      "/api/documents/test-document/export?fileId=test-file",
+    );
     expect(attribute(link, "download")).toBeDefined();
     expect(markup).toContain("Ladda ner HTML");
     expect(markup).toContain("Ditt osparade utkast ingår inte.");
     expect(
       renderToStaticMarkup(
-        React.createElement(DocumentHtmlExport, {
+        React.createElement(DocumentFileExport, {
           documentId: "test-document",
+          file: { id: "test-file", name: "plan.html", format: "html" },
           hasDraft: false,
         }),
       ),

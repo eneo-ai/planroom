@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { scrypt } from "node:crypto";
 import { verifyPassword } from "../src/server/passwords";
-import { db } from "../src/server/db";
+import { db, transaction } from "../src/server/db";
 import { migrate } from "../src/server/migrate";
 import { seedBootstrap } from "../src/server/bootstrap";
 import {
@@ -33,7 +33,7 @@ import {
   listComments,
 } from "../src/server/documents";
 import { AppError } from "../src/server/errors";
-import { documentContentSchema } from "../src/contracts";
+import { documentContentSchema, planningFilesSchema } from "../src/contracts";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
@@ -48,7 +48,14 @@ import {
 const enabled = Boolean(process.env.TEST_DATABASE_URL);
 const content = documentContentSchema.parse({
   title: "Concurrent planning",
-  html: "<h1>Original</h1><script>localDemo()</script>",
+  files: [
+    {
+      id: "123e4567-e89b-42d3-a456-426614174000",
+      name: "plan.html",
+      format: "html",
+      content: "<h1>Original</h1><script>localDemo()</script>",
+    },
+  ],
   instructions: "Preserve diagrams",
   changeSummary: "Initial revision",
 });
@@ -285,13 +292,13 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     const results = await Promise.allSettled([
       updateDocument(principal, original.id, {
         ...content,
-        html: "<p>Writer A</p>",
+        files: [{ ...content.files[0], content: "<p>Writer A</p>" }],
         changeSummary: "A",
         expectedVersion: 1,
       }),
       updateDocument(principal, original.id, {
         ...content,
-        html: "<p>Writer B</p>",
+        files: [{ ...content.files[0], content: "<p>Writer B</p>" }],
         changeSummary: "B",
         expectedVersion: 1,
       }),
@@ -322,11 +329,11 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
       }),
     ).toMatchObject({
       currentRevision: 3,
-      html: content.html,
+      files: content.files,
       instructions: content.instructions,
     });
-    expect((await getRevision(principal, original.id, 1)).html).toBe(
-      content.html,
+    expect((await getRevision(principal, original.id, 1)).files).toEqual(
+      content.files,
     );
     expect(await listRevisions(principal, original.id)).toHaveLength(3);
   });
@@ -344,7 +351,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
       version: 2,
       title: "Renamed plan",
       instructions: "Updated guidance",
-      html: content.html,
+      files: content.files,
     });
     expect(await listRevisions(principal, original.id)).toHaveLength(1);
     expect(await getRevision(principal, original.id, 1)).toMatchObject({
@@ -383,7 +390,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     const latest = await getDocument(principal, original.id);
     const revised = await updateDocument(principal, original.id, {
       ...latest,
-      html: latest.html + "\n",
+      files: [{ ...latest.files[0], content: latest.files[0].content + "\n" }],
       changeSummary: "Source changed",
       expectedVersion: latest.version,
     });
@@ -391,7 +398,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     expect(await getRevision(principal, original.id, 2)).toMatchObject({
       title: latest.title,
       instructions: latest.instructions,
-      html: latest.html + "\n",
+      files: [{ ...latest.files[0], content: latest.files[0].content + "\n" }],
     });
   });
   it.each(["ready", "in_development", "completed", "archived"] as const)(
@@ -408,7 +415,9 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
         updateDocument(principal, original.id, {
           ...content,
           status: "draft",
-          html: "<p>Must not overwrite</p>",
+          files: [
+            { ...content.files[0], content: "<p>Must not overwrite</p>" },
+          ],
           expectedVersion: 2,
         }),
       ).rejects.toMatchObject({ code: "DOCUMENT_LOCKED", currentRevision: 1 });
@@ -439,7 +448,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
         status,
         currentRevision: 1,
         version: 2,
-        html: original.html,
+        files: original.files,
         updatedAt: frozen.updatedAt,
         authorName: frozen.authorName,
       });
@@ -461,7 +470,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
       const edited = await updateDocument(principal, original.id, {
         ...content,
         status: "active",
-        html: "<p>New scope</p>",
+        files: [{ ...content.files[0], content: "<p>New scope</p>" }],
         expectedVersion: 3,
       });
       expect(edited).toMatchObject({
@@ -469,8 +478,8 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
         version: 4,
         githubLinks,
       });
-      expect((await getRevision(principal, original.id, 1)).html).toBe(
-        original.html,
+      expect((await getRevision(principal, original.id, 1)).files).toEqual(
+        original.files,
       );
       expect(await listRevisions(principal, original.id)).toHaveLength(2);
     },
@@ -495,7 +504,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
       version: 2,
       githubLinksVersion: 2,
       githubLinks,
-      html: content.html,
+      files: content.files,
     });
     expect(await listRevisions(principal, original.id)).toHaveLength(1);
   });
@@ -539,7 +548,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     });
     const edited = await updateDocument(principal, original.id, {
       ...content,
-      html: "<p>Updated</p>",
+      files: [{ ...content.files[0], content: "<p>Updated</p>" }],
       expectedVersion: 1,
     });
     expect(edited.githubLinks).toEqual(githubLinks);
@@ -557,7 +566,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     expect(restored).toMatchObject({
       currentRevision: 3,
       version: 3,
-      html: original.html,
+      files: original.files,
       githubLinks: [],
     });
     const renamed = await updateDocument(principal, original.id, {
@@ -933,13 +942,13 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
       const parsed: unknown = JSON.parse(text.text);
       expect(
         z
-          .object({ html: z.string(), currentRevision: z.number() })
+          .object({ files: planningFilesSchema, currentRevision: z.number() })
           .parse(parsed),
-      ).toEqual({ html: content.html, currentRevision: 1 });
+      ).toEqual({ files: content.files, currentRevision: 1 });
       const update = {
         id: original.id,
         ...content,
-        html: "<h1>MCP update</h1>",
+        files: [{ ...content.files[0], content: "<h1>MCP update</h1>" }],
         expectedVersion: 1,
         changeSummary: "Updated via MCP",
       };
@@ -1288,6 +1297,97 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     expect(await listRevisions(principal, document.id)).toHaveLength(1);
     expect(await listComments(principal, document.id)).toEqual([]);
     await deleteToken(principal, key.record.id);
+  });
+  it("migrates every legacy HTML revision without source loss and keeps a stable file identity", async () => {
+    const sql = await readFile(
+      resolve(process.cwd(), "migrations/006_planning_files.sql"),
+      "utf8",
+    );
+    const documentId = crypto.randomUUID();
+    const sources = [
+      "<!doctype html>\r\n<svg>åäö</svg><script>demo()</script>  ",
+      " \n ",
+    ];
+    await transaction(async (client) => {
+      // The temporary table shadows the real owner for this transaction only.
+      await client.query(
+        "CREATE TEMP TABLE document_revisions (document_id uuid, number integer, html text NOT NULL) ON COMMIT DROP",
+      );
+      for (const [index, source] of sources.entries())
+        await client.query("INSERT INTO document_revisions VALUES($1,$2,$3)", [
+          documentId,
+          index + 1,
+          source,
+        ]);
+      await client.query(sql);
+      const rows = (
+        await client.query<{ files: unknown }>(
+          "SELECT * FROM document_revisions ORDER BY number",
+        )
+      ).rows;
+      expect(rows.map((row) => planningFilesSchema.parse(row.files))).toEqual(
+        sources.map((source) => [
+          {
+            id: documentId,
+            name: "planering.html",
+            format: "html",
+            content: source,
+          },
+        ]),
+      );
+      for (const row of rows) expect(row).not.toHaveProperty("html");
+    });
+  });
+  it("versions mixed file additions, edits and removals, restores the whole collection and lists metadata only", async () => {
+    const files = planningFilesSchema.parse([
+      content.files[0],
+      {
+        id: crypto.randomUUID(),
+        name: "beslut.md",
+        format: "markdown",
+        content: "# Beslut\r\n- [ ] Fortsätt  \r\n",
+      },
+      {
+        id: crypto.randomUUID(),
+        name: "demo.html",
+        format: "html",
+        content: "<svg>Demo</svg>",
+      },
+    ]);
+    const original = await createDocument(principal, { ...content, files });
+    expect(original.files).toEqual(files);
+    const listed = (await listDocuments(principal)).find(
+      (entry) => entry.id === original.id,
+    );
+    expect(listed?.files).toEqual(
+      files.map(({ id, name, format }) => ({ id, name, format })),
+    );
+    const updatedFiles = [
+      { ...files[1], content: "# Beslut\n- [x] Klart" },
+      {
+        id: crypto.randomUUID(),
+        name: "handoff.md",
+        format: "markdown" as const,
+        content: "Nästa steg",
+      },
+    ];
+    await updateDocument(principal, original.id, {
+      ...content,
+      files: updatedFiles,
+      expectedVersion: 1,
+    });
+    expect((await getDocument(principal, original.id)).files).toEqual(
+      updatedFiles,
+    );
+    expect((await getRevision(principal, original.id, 1)).files).toEqual(files);
+    const restored = await restoreDocument(principal, original.id, 1, {
+      expectedVersion: 2,
+      changeSummary: "Restore all original files",
+    });
+    expect(restored.files).toEqual(files);
+    expect((await getRevision(principal, original.id, 2)).files).toEqual(
+      updatedFiles,
+    );
   });
   it("migrates latest metadata and references without rewriting existing HTML history", async () => {
     const client = await db.connect();

@@ -12,11 +12,20 @@ import {
   updateDocumentStatusSchema,
   updateDocumentGitHubLinksSchema,
   apiTokenSchema,
+  planningFilesSchema,
 } from "../src/contracts";
 
 const content = {
   title: "Orkestreraren",
-  html: '<!doctype html><html><body><svg><text>Plan</text></svg><script>document.title = "Demo";</script></body></html>',
+  files: [
+    {
+      id: "123e4567-e89b-42d3-a456-426614174000",
+      name: "plan.html",
+      format: "html",
+      content:
+        '<!doctype html><html><body><svg><text>Plan</text></svg><script>document.title = "Demo";</script></body></html>',
+    },
+  ],
   changeSummary: "Imported original planning document",
 };
 
@@ -25,7 +34,7 @@ describe("planning input contract", () => {
     const instructions =
       "  Läs besluten före uppdatering.\nBevara diagrammen.  ";
     const result = documentContentSchema.parse({ ...content, instructions });
-    expect(result.html).toBe(content.html);
+    expect(result.files).toEqual(content.files);
     expect(result.instructions).toBe(instructions);
     expect(result.status).toBe("draft");
     expect(result.description).toBe("");
@@ -35,9 +44,10 @@ describe("planning input contract", () => {
     ["title", " ", false],
     ["title", "a".repeat(200), true],
     ["title", "a".repeat(201), false],
-    ["html", "", false],
-    ["html", "a".repeat(2_000_000), true],
-    ["html", "a".repeat(2_000_001), false],
+    ["files", [], false],
+    ["files", [{ ...content.files[0], content: "" }], false],
+    ["files", [{ ...content.files[0], content: "a".repeat(2_000_000) }], true],
+    ["files", [{ ...content.files[0], content: "a".repeat(2_000_001) }], false],
     ["instructions", "a".repeat(100_001), false],
     ["description", "a".repeat(2_001), false],
     ["changeSummary", "  ", false],
@@ -75,6 +85,90 @@ describe("planning input contract", () => {
     ).toBe(3);
   });
 
+  it("accepts multiple HTML files, Markdown-only plans and mixed formats without changing sources", () => {
+    const html = content.files[0];
+    const markdown = {
+      id: "223e4567-e89b-42d3-a456-426614174000",
+      name: "beslut.md",
+      format: "markdown",
+      content: "  # Beslut\r\n\r\n- [ ] Bevara originalet  \r\n",
+    };
+    const secondHtml = {
+      ...html,
+      id: "323e4567-e89b-42d3-a456-426614174000",
+      name: "demo.HTM",
+    };
+    const secondMarkdown = {
+      ...markdown,
+      id: "423e4567-e89b-42d3-a456-426614174000",
+      name: "spec.markdown",
+    };
+    for (const files of [
+      [html, secondHtml],
+      [markdown],
+      [markdown, secondMarkdown],
+      [html, markdown],
+    ]) {
+      expect(documentContentSchema.parse({ ...content, files }).files).toEqual(
+        files,
+      );
+      expect(
+        updateDocumentSchema.parse({ ...content, files, expectedVersion: 1 })
+          .files,
+      ).toEqual(files);
+    }
+  });
+
+  it("rejects duplicate identities/names, wrong formats, paths and aggregate source overflow", () => {
+    const file = content.files[0];
+    for (const files of [
+      [file, { ...file, name: "other.html" }],
+      [file, { ...file, id: file.id.toUpperCase(), name: "other.html" }],
+      [
+        file,
+        {
+          ...file,
+          id: "223e4567-e89b-42d3-a456-426614174000",
+          name: "PLAN.HTML",
+        },
+      ],
+      [{ ...file, name: "plan.md" }],
+      [{ ...file, format: "pdf" }],
+      [{ ...file, id: "bad-id" }],
+      [{ ...file, name: "../plan.html" }],
+      [{ ...file, name: "plan\r\n.html" }],
+      [{ ...file, name: "invalid\ud800.html" }],
+      [{ ...file, content: "source\0" }],
+      [{ ...file, content: "source\ud800" }],
+      [
+        { ...file, content: "a".repeat(1_000_001) },
+        {
+          ...file,
+          id: "223e4567-e89b-42d3-a456-426614174000",
+          name: "other.html",
+          content: "a".repeat(1_000_000),
+        },
+      ],
+    ])
+      expect(planningFilesSchema.safeParse(files).success).toBe(false);
+    const files = Array.from({ length: 21 }, (_, index) => ({
+      ...file,
+      id: crypto.randomUUID(),
+      name: `plan-${index}.html`,
+    }));
+    expect(planningFilesSchema.safeParse(files.slice(0, 20)).success).toBe(
+      true,
+    );
+    expect(planningFilesSchema.safeParse(files).success).toBe(false);
+    expect(
+      documentContentSchema.safeParse({
+        title: "Old request",
+        html: "<p>Legacy</p>",
+        changeSummary: "Import",
+      }).success,
+    ).toBe(false);
+  });
+
   it("freezes the handoff and later states and permits reopening into active planning", () => {
     expect(statusSchema.options.filter(canEditDocumentContent)).toEqual([
       "draft",
@@ -106,7 +200,7 @@ describe("planning input contract", () => {
       updateDocumentStatusSchema.safeParse({
         status: "draft",
         expectedVersion: 1,
-        html: "<p>Replacement</p>",
+        files: content.files,
       }).success,
     ).toBe(false);
     expect(

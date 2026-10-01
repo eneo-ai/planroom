@@ -14,6 +14,8 @@ import type {
   RevisionDetail,
   RevisionSummary,
   User,
+  PlanningFile,
+  PlanningFileSummary,
 } from "../contracts";
 import { canEditDocumentContent, documentStatusLabels } from "../contracts";
 import {
@@ -31,7 +33,7 @@ interface RevisionRow {
   number: number;
   title: string;
   description: string;
-  html: string;
+  files: PlanningFile[];
   instructions: string;
   status: DocumentStatus;
   github_links: string[];
@@ -58,13 +60,13 @@ type SummaryRow = Pick<
   | "author_name"
   | "document_created_at"
   | "updated_at"
->;
+> & { files: PlanningFileSummary[] };
 type RevisionSummaryRow = Pick<
   RevisionRow,
   "id" | "number" | "title" | "change_summary" | "author_name" | "created_at"
 >;
-const currentSelect = `SELECT r.id,r.document_id,r.number,r.html,d.title,d.description,d.instructions,d.status,d.change_summary,d.version,d.github_links,d.github_links_version,u.name AS author_name,d.created_at AS document_created_at,d.updated_at FROM documents d JOIN document_revisions r ON r.document_id=d.id AND r.number=d.current_revision JOIN users u ON u.id=d.author_id`;
-const summarySelect = `SELECT d.id AS document_id,d.current_revision AS number,d.title,d.description,d.status,d.version,d.github_links,d.github_links_version,u.name AS author_name,d.created_at AS document_created_at,d.updated_at FROM documents d JOIN users u ON u.id=d.author_id`;
+const currentSelect = `SELECT r.id,r.document_id,r.number,r.files,d.title,d.description,d.instructions,d.status,d.change_summary,d.version,d.github_links,d.github_links_version,u.name AS author_name,d.created_at AS document_created_at,d.updated_at FROM documents d JOIN document_revisions r ON r.document_id=d.id AND r.number=d.current_revision JOIN users u ON u.id=d.author_id`;
+const summarySelect = `SELECT (SELECT jsonb_agg(file - 'content' ORDER BY ordinal) FROM jsonb_array_elements(r.files) WITH ORDINALITY AS entries(file, ordinal)) AS files,d.id AS document_id,d.current_revision AS number,d.title,d.description,d.status,d.version,d.github_links,d.github_links_version,u.name AS author_name,d.created_at AS document_created_at,d.updated_at FROM documents d JOIN document_revisions r ON r.document_id=d.id AND r.number=d.current_revision JOIN users u ON u.id=d.author_id`;
 function summary(row: SummaryRow): DocumentSummary {
   return {
     id: row.document_id,
@@ -72,6 +74,7 @@ function summary(row: SummaryRow): DocumentSummary {
     description: row.description,
     status: row.status,
     githubLinks: row.github_links,
+    files: row.files.map(({ id, name, format }) => ({ id, name, format })),
     githubLinksVersion: row.github_links_version,
     version: row.version,
     currentRevision: row.number,
@@ -83,7 +86,7 @@ function summary(row: SummaryRow): DocumentSummary {
 function detail(row: DocumentRow): DocumentDetail {
   return {
     ...summary(row),
-    html: row.html,
+    files: row.files,
     instructions: row.instructions,
     changeSummary: row.change_summary,
   };
@@ -102,7 +105,7 @@ function revisionDetail(row: RevisionRow): RevisionDetail {
   return {
     ...revisionSummary(row),
     description: row.description,
-    html: row.html,
+    files: row.files,
     instructions: row.instructions,
     status: row.status,
     githubLinks: row.github_links,
@@ -145,14 +148,14 @@ async function insertRevision(
   githubLinks: string[],
 ): Promise<void> {
   await client.query(
-    "INSERT INTO document_revisions(id,document_id,number,title,description,html,instructions,status,change_summary,author_id,github_links) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
+    "INSERT INTO document_revisions(id,document_id,number,title,description,files,instructions,status,change_summary,author_id,github_links) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11)",
     [
       randomUUID(),
       id,
       number,
       content.title,
       content.description,
-      content.html,
+      JSON.stringify(content.files),
       content.instructions,
       content.status,
       content.changeSummary,
@@ -232,16 +235,26 @@ async function writeDocument(
     await lockDocument(client, id, expectedVersion);
     const current = await fetchDocument(client, id);
     const content = await change(current, client);
-    const htmlChanged = content.html !== current.html;
+    const filesChanged =
+      content.files.length !== current.files.length ||
+      content.files.some((file, index) => {
+        const previous = current.files[index];
+        return (
+          file.id !== previous.id ||
+          file.name !== previous.name ||
+          file.format !== previous.format ||
+          file.content !== previous.content
+        );
+      });
     const metadataChanged =
       content.title !== current.title ||
       content.description !== current.description ||
       content.instructions !== current.instructions ||
       content.status !== current.status;
     // An identical save is not a new edit, even if its summary differs.
-    if (!htmlChanged && !metadataChanged) return current;
-    const number = current.currentRevision + (htmlChanged ? 1 : 0);
-    if (htmlChanged)
+    if (!filesChanged && !metadataChanged) return current;
+    const number = current.currentRevision + (filesChanged ? 1 : 0);
+    if (filesChanged)
       await insertRevision(
         client,
         verified.user,
@@ -427,7 +440,7 @@ export async function restoreDocument(
       return {
         title: source.title,
         description: source.description,
-        html: source.html,
+        files: source.files,
         instructions: source.instructions,
         status: source.status,
         changeSummary: input.changeSummary,
