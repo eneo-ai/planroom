@@ -36,7 +36,6 @@ services:
     environment:
       DATABASE_URL: postgres://planroom:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/planroom
       APP_URL: ${APP_URL:-http://localhost:3210}
-      TLDRAW_LICENSE_KEY: ${TLDRAW_LICENSE_KEY:-}
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@planroom.local}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:?Set SEED_ADMIN_PASSWORD in .env}
       SEED_EXAMPLE: ${SEED_EXAMPLE:-true}

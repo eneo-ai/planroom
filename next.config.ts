@@ -14,7 +14,7 @@ const config: NextConfig = {
           {
             key: "Content-Security-Policy",
             value:
-              "frame-src 'self' about:; object-src 'none'; base-uri 'self' about:; form-action 'self'",
+              "frame-src 'self' about:; object-src 'none'; base-uri 'self' about:; form-action 'self'; font-src 'self' data:",
           },
           { key: "Referrer-Policy", value: "no-referrer" },
           {

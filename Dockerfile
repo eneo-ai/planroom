@@ -3,6 +3,7 @@ FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddf
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY scripts/copy-canvas-assets.mjs ./scripts/copy-canvas-assets.mjs
+COPY third-party/excalidraw/LICENSE ./third-party/excalidraw/LICENSE
 RUN npm ci --no-audit --no-fund
 
 FROM dependencies AS builder

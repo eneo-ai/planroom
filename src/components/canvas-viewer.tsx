@@ -1,21 +1,26 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { Component, useEffect, useState, type ReactNode } from "react";
+import { Component, useState, type ReactNode } from "react";
 import { Button } from "@astryxdesign/core/Button";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Card } from "@astryxdesign/core/Card";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Expand, Minimize } from "lucide-react";
 import type { Canvas } from "@/canvas";
-import { canvasConfigurationSchema } from "@/contracts";
-import { api, errorMessage } from "@/client/api";
 import styles from "./document-canvas.module.css";
 
-const CanvasSurface = dynamic(() => import("./canvas-surface"), {
-  ssr: false,
-  loading: () => <p role="status">Öppnar visualiseringen…</p>,
-});
+const CanvasSurface = dynamic(
+  () => {
+    // Configure local fonts before evaluating the browser-only SDK module.
+    Object.assign(window, { EXCALIDRAW_ASSET_PATH: "/excalidraw/" });
+    return import("./canvas-surface");
+  },
+  {
+    ssr: false,
+    loading: () => <p role="status">Öppnar visualiseringen…</p>,
+  },
+);
 
 class CanvasBoundary extends Component<
   { children: ReactNode },
@@ -40,31 +45,10 @@ class CanvasBoundary extends Component<
 
 export function CanvasViewer({ canvas }: { canvas: Canvas }) {
   const [expanded, setExpanded] = useState(false);
-  const [configuration, setConfiguration] = useState<{
-    licenseKey: string | null;
-  } | null>(null);
-  const [error, setError] = useState("");
-  const [attempt, setAttempt] = useState(0);
-  useEffect(() => {
-    const controller = new AbortController();
-    void api("/api/canvas/config", { signal: controller.signal })
-      .then((response) => {
-        if (!controller.signal.aborted) {
-          setConfiguration(canvasConfigurationSchema.parse(response));
-          setError("");
-        }
-      })
-      .catch((cause: unknown) => {
-        if (!controller.signal.aborted) setError(errorMessage(cause));
-      });
-    return () => controller.abort();
-  }, [attempt]);
-  const surface = configuration ? (
+  const surface = (
     <CanvasBoundary>
-      <CanvasSurface canvas={canvas} licenseKey={configuration.licenseKey} />
+      <CanvasSurface canvas={canvas} />
     </CanvasBoundary>
-  ) : (
-    <p role="status">Förbereder diagramvyn…</p>
   );
   const nodes = new Map(
     canvas.shapes
@@ -85,22 +69,8 @@ export function CanvasViewer({ canvas }: { canvas: Canvas }) {
           label="Expandera diagrammet"
           icon={<Expand size={16} aria-hidden />}
           onClick={() => setExpanded(true)}
-          isDisabled={!configuration}
         />
       </div>
-      {error && (
-        <Banner
-          status="error"
-          title="Diagramvyn kunde inte förberedas"
-          description={error}
-          endContent={
-            <Button
-              label="Försök igen"
-              onClick={() => setAttempt((value) => value + 1)}
-            />
-          }
-        />
-      )}
       <Card padding={0}>{!expanded && surface}</Card>
       <details className={styles.textView}>
         <summary>Visa diagrammets innehåll som text</summary>

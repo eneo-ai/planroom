@@ -1,48 +1,50 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Tldraw, type Editor } from "tldraw";
-import { getAssetUrls } from "@tldraw/assets/selfHosted";
+import {
+  CaptureUpdateAction,
+  Excalidraw,
+  convertToExcalidrawElements,
+  exportToBlob,
+} from "@excalidraw/excalidraw";
+import type {
+  AppState,
+  ExcalidrawImperativeAPI,
+} from "@excalidraw/excalidraw/types";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Button } from "@astryxdesign/core/Button";
 import { Toolbar } from "@astryxdesign/core/Toolbar";
 import { Banner } from "@astryxdesign/core/Banner";
 import { ZoomIn, ZoomOut, Scan, Download } from "lucide-react";
 import type { Canvas } from "@/canvas";
-import { renderCanvas } from "@/client/canvas-renderer";
+import { canvasShapes } from "@/client/canvas-renderer";
 import { errorMessage } from "@/client/api";
-import "tldraw/tldraw.css";
+import "@excalidraw/excalidraw/index.css";
 import styles from "./document-canvas.module.css";
 
-const components = {
-  ErrorFallback: () => (
-    <Banner
-      status="error"
-      title="Diagrammotorn kunde inte starta"
-      description="Läs textversionen eller ladda om sidan. Kontrollera SDK-licensen i installationens konfiguration."
-    />
-  ),
-  ShapeErrorFallback: () => (
-    <span role="status">Objektet kunde inte visas</span>
-  ),
-};
-const assetUrls = getAssetUrls({ baseUrl: "/tldraw/" });
-
-export default function CanvasSurface({
-  canvas,
-  licenseKey,
-}: {
-  canvas: Canvas;
-  licenseKey: string | null;
-}) {
-  const [editor, setEditor] = useState<Editor | null>(null);
+export default function CanvasSurface({ canvas }: { canvas: Canvas }) {
+  const [editor, setEditor] = useState<ExcalidrawImperativeAPI | null>(null);
   const [error, setError] = useState("");
   const [exporting, setExporting] = useState(false);
   const rendered = useRef(false);
+
   useEffect(() => {
     if (!editor) return;
     try {
-      renderCanvas(editor, canvas, !rendered.current);
+      const elements = convertToExcalidrawElements(canvasShapes(canvas), {
+        regenerateIds: false,
+      });
+      editor.updateScene({
+        elements,
+        captureUpdate: CaptureUpdateAction.NEVER,
+      });
+      editor.setActiveTool({ type: "hand" });
+      if (!rendered.current) {
+        editor.scrollToContent(elements, {
+          fitToContent: true,
+          animate: false,
+        });
+      }
       rendered.current = true;
       setError("");
     } catch (cause) {
@@ -50,21 +52,48 @@ export default function CanvasSurface({
     }
   }, [editor, canvas]);
 
+  function zoom(factor: number) {
+    if (!editor) return;
+    const state = editor.getAppState();
+    const previous = state.zoom.value;
+    const next = Math.min(8, Math.max(0.1, previous * factor));
+    editor.updateScene({
+      appState: {
+        zoom: { value: next as AppState["zoom"]["value"] },
+        scrollX:
+          state.scrollX +
+          state.width / (2 * next) -
+          state.width / (2 * previous),
+        scrollY:
+          state.scrollY +
+          state.height / (2 * next) -
+          state.height / (2 * previous),
+      },
+      captureUpdate: CaptureUpdateAction.NEVER,
+    });
+  }
+
   async function download() {
     if (!editor || exporting) return;
     setExporting(true);
     setError("");
     let url: string | undefined;
     try {
-      const bounds = editor.getCurrentPageBounds();
-      const scale = bounds
-        ? Math.min(1, 4000 / Math.max(bounds.width + 64, bounds.height + 64))
-        : 1;
-      const result = await editor.toImage(
-        [...editor.getCurrentPageShapeIds()],
-        { format: "png", scale, pixelRatio: 1, background: true },
-      );
-      url = URL.createObjectURL(result.blob);
+      const blob = await exportToBlob({
+        elements: editor.getSceneElements(),
+        appState: { ...editor.getAppState(), exportBackground: true },
+        files: null,
+        mimeType: "image/png",
+        getDimensions: (width: number, height: number) => {
+          const scale = Math.min(1, 4000 / Math.max(width, height));
+          return {
+            width: Math.ceil(width * scale),
+            height: Math.ceil(height * scale),
+            scale,
+          };
+        },
+      });
+      url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
       link.download = "planroom-visualisering.png";
@@ -76,6 +105,7 @@ export default function CanvasSurface({
       setExporting(false);
     }
   }
+
   return (
     <div className={styles.surface}>
       <Toolbar
@@ -83,27 +113,31 @@ export default function CanvasSurface({
         size="sm"
         startContent={
           <span className="fine-print">
-            Dra för att panorera · Scrolla för att zooma
+            Dra för att panorera · Använd knapparna för att zooma
           </span>
         }
         endContent={
           <>
             <IconButton
               label="Zooma ut"
+              tooltip="Zooma ut"
               icon={<ZoomOut size={16} aria-hidden />}
-              onClick={() => editor?.zoomOut()}
+              onClick={() => zoom(1 / 1.2)}
               isDisabled={!editor}
             />
             <IconButton
               label="Zooma in"
+              tooltip="Zooma in"
               icon={<ZoomIn size={16} aria-hidden />}
-              onClick={() => editor?.zoomIn()}
+              onClick={() => zoom(1.2)}
               isDisabled={!editor}
             />
             <Button
               label="Visa hela diagrammet"
               icon={<Scan size={16} aria-hidden />}
-              onClick={() => editor?.zoomToFit()}
+              onClick={() =>
+                editor?.scrollToContent(undefined, { fitToContent: true })
+              }
               isDisabled={!editor}
             />
             <Button
@@ -123,23 +157,41 @@ export default function CanvasSurface({
           description={error}
         />
       )}
-      <div className={styles.stage} aria-label={`Diagram: ${canvas.title}`}>
-        <Tldraw
-          hideUi
-          components={components}
-          locale="sv"
-          colorScheme="system"
-          options={{ maxShapesPerPage: 300, maxPages: 1 }}
-          assetUrls={assetUrls}
-          licenseKey={licenseKey ?? undefined}
+      <div
+        className={styles.stage}
+        aria-label={`Diagram: ${canvas.title}`}
+        onContextMenuCapture={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onDropCapture={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+      >
+        <Excalidraw
+          excalidrawAPI={setEditor}
+          viewModeEnabled
+          zenModeEnabled
+          theme="light"
+          langCode="sv-SE"
+          name={canvas.title}
+          aiEnabled={false}
           autoFocus={false}
-          onMount={(next) => {
-            next.updateInstanceState({ isReadonly: true });
-            next.setCurrentTool("hand");
-            setEditor(next);
-            return () => {
-              rendered.current = false;
-            };
+          handleKeyboardGlobally={false}
+          validateEmbeddable={false}
+          onPaste={() => false}
+          UIOptions={{
+            canvasActions: {
+              clearCanvas: false,
+              loadScene: false,
+              saveToActiveFile: false,
+              export: false,
+              saveAsImage: false,
+              changeViewBackgroundColor: false,
+              toggleTheme: false,
+            },
+            tools: { image: false },
           }}
         />
       </div>

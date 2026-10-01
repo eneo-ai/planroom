@@ -27,6 +27,11 @@
   overflow: hidden;
   isolation: isolate;
 }
+/* Excalidraw 0.18 has no hideUi prop. Astryx owns the viewer actions above;
+   hide the whole SDK overlay without restyling its controls or focus rings. */
+.stage :global(.excalidraw .layer-ui__wrapper) {
+  display: none;
+}
 .empty {
   min-height: 340px;
   display: grid;

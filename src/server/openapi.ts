@@ -2,7 +2,6 @@ import { z } from "zod";
 import {
   updateCanvasSchema,
   documentCanvasSchema,
-  canvasConfigurationSchema,
   apiDiscoverySchema,
   apiErrorBodySchema,
   apiTokenSchema,
@@ -118,7 +117,6 @@ const requestSchemas = {
 };
 const responseSchemas = {
   DocumentCanvas: documentCanvasSchema,
-  CanvasConfiguration: canvasConfigurationSchema,
   User: userSchema,
   DocumentSummary: documentSummarySchema,
   DocumentDetail: documentDetailSchema,
@@ -285,20 +283,6 @@ export const openApiDocument: OpenApiDocument = {
     },
   ],
   paths: {
-    "/api/canvas/config": {
-      get: {
-        operationId: "getCanvasConfiguration",
-        summary: "Read canvas SDK configuration",
-        description:
-          "Authenticated public browser configuration: the tldraw production license key, or null in development. This is not an AI provider credential.",
-        tags: ["Documents"],
-        security: security.document,
-        responses: {
-          "200": jsonResponse("Canvas configuration.", "CanvasConfiguration"),
-          ...errors(401, 403, 500),
-        },
-      },
-    },
     "/api/documents/{id}/canvas": {
       get: {
         operationId: "readCanvas",

@@ -1,109 +1,97 @@
-import {
-  createShapeId,
-  toRichText,
-  type Editor,
-  type TLShapePartial,
-  type TLDefaultColorStyle,
-} from "tldraw";
+import type { ExcalidrawElementSkeleton } from "@excalidraw/excalidraw/data/transform";
 import { canvasConnector, type Canvas, type CanvasNode } from "../canvas";
 
-const colors: Record<CanvasNode["color"], TLDefaultColorStyle> = {
-  neutral: "black",
-  blue: "blue",
-  green: "green",
-  orange: "orange",
-  red: "red",
-  violet: "violet",
+// Diagram ink/fills belong to the SDK surface; application controls use Astryx.
+const colors: Record<CanvasNode["color"], { ink: string; fill: string }> = {
+  neutral: { ink: "#495057", fill: "#f1f3f5" },
+  blue: { ink: "#1971c2", fill: "#d0ebff" },
+  green: { ink: "#2b8a3e", fill: "#d3f9d8" },
+  orange: { ink: "#e8590c", fill: "#ffe8cc" },
+  red: { ink: "#c92a2a", fill: "#ffe3e3" },
+  violet: { ink: "#6741d9", fill: "#e5dbff" },
 };
 
-export function canvasShapes(canvas: Canvas): TLShapePartial[] {
+/** Adapt the persisted contract to the pinned SDK's programmatic element API. */
+export function canvasShapes(canvas: Canvas): ExcalidrawElementSkeleton[] {
   const nodes = new Map(
     canvas.shapes
       .filter((shape): shape is CanvasNode => shape.type !== "arrow")
       .map((shape) => [shape.id, shape]),
   );
-  const arrows: TLShapePartial[] = [];
-  const boxes: TLShapePartial[] = [];
+  const arrows: ExcalidrawElementSkeleton[] = [];
+  const boxes: ExcalidrawElementSkeleton[] = [];
   for (const shape of canvas.shapes) {
-    const id = createShapeId(shape.id);
-    const color = colors[shape.color];
+    const { ink, fill } = colors[shape.color];
+    const style = {
+      id: shape.id,
+      strokeColor: ink,
+      strokeWidth: 2,
+      roughness: 0,
+      seed: 1,
+      locked: true,
+    };
+    // ':' cannot occur in persisted IDs, so labels cannot collide with AI nodes.
+    const label = shape.text
+      ? {
+          id: `label:${shape.id}`,
+          text: shape.text,
+          fontFamily: 6, // Nunito, self-hosted from the pinned SDK.
+          fontSize: 18,
+          textAlign: "center" as const,
+          verticalAlign: "middle" as const,
+          strokeColor: "#212529",
+        }
+      : undefined;
     if (shape.type === "arrow") {
       const start = nodes.get(shape.startId);
       const end = nodes.get(shape.endId);
       if (!start || !end) throw new Error("Invalid canvas connector");
       const points = canvasConnector(start, end);
       arrows.push({
-        id,
+        ...style,
         type: "arrow",
-        x: 0,
-        y: 0,
-        props: {
-          start: points.start,
-          end: points.end,
-          color,
-          labelColor: color,
-          richText: toRichText(shape.text),
-          font: "sans",
-          size: "s",
-          dash: "solid",
-          arrowheadEnd: "arrow",
-        },
+        x: points.start.x,
+        y: points.start.y,
+        points: [
+          [0, 0],
+          [points.end.x - points.start.x, points.end.y - points.start.y],
+        ],
+        endArrowhead: "arrow",
+        startArrowhead: null,
+        start: { id: shape.startId },
+        end: { id: shape.endId },
+        label,
       });
     } else if (shape.type === "text") {
       boxes.push({
-        id,
+        ...style,
         type: "text",
         x: shape.x,
         y: shape.y,
-        props: {
-          richText: toRichText(shape.text),
-          color,
-          font: "sans",
-          size: "s",
-          w: shape.width,
-          autoSize: false,
-        },
+        text: shape.text,
+        width: shape.width,
+        fontFamily: 6,
+        fontSize: 18,
+        autoResize: false,
       });
     } else {
       boxes.push({
-        id,
-        type: "geo",
+        ...style,
+        type: shape.type === "note" ? "rectangle" : shape.type,
         x: shape.x,
         y: shape.y,
-        props: {
-          geo: shape.type === "note" ? "rectangle" : shape.type,
-          w: shape.width,
-          h: shape.height,
-          richText: toRichText(shape.text),
-          color,
-          labelColor: "black",
-          fill: "semi",
-          font: "sans",
-          size: "s",
-          dash: "solid",
-          align: "middle",
-          verticalAlign: "middle",
-        },
+        width: shape.width,
+        height: shape.height,
+        backgroundColor: fill,
+        fillStyle: "solid",
+        roundness:
+          shape.type === "rectangle" || shape.type === "note"
+            ? { type: 3, value: 16 }
+            : null,
+        label,
       });
     }
   }
-  // Connectors sit underneath nodes, with endpoints at each node boundary.
+  // AI owns node movement; connector geometry is rebuilt for each saved scene.
   return [...arrows, ...boxes];
-}
-
-export function renderCanvas(editor: Editor, canvas: Canvas, fit: boolean) {
-  editor.run(
-    () => {
-      const readonly = editor.getIsReadonly();
-      editor.updateInstanceState({ isReadonly: false });
-      try {
-        editor.deleteShapes([...editor.getCurrentPageShapeIds()]);
-        editor.createShapes(canvasShapes(canvas));
-      } finally {
-        editor.updateInstanceState({ isReadonly: readonly });
-      }
-    },
-    { history: "ignore", ignoreShapeLock: true },
-  );
-  if (fit) editor.zoomToFit({ animation: { duration: 0 } });
 }

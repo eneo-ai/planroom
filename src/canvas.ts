@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// This is Planroom's portable diagram contract, not a tldraw store snapshot.
+// Planroom owns this portable diagram contract independently of the rendering SDK.
 // Only text and known geometry enter the application DOM. No HTML, URLs or assets.
 export const maxCanvasShapes = 300;
 const id = z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/);

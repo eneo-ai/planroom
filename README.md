@@ -26,7 +26,7 @@ Developed for shared planning at **Sundsvalls kommun**, Sweden. The repository i
 - Combines HTML and Markdown files on one planning card, preserving original sources, CSS and inline SVG.
 - Stores immutable HTML revisions with a metadata snapshot; status, instructions and GitHub references can change without duplicating HTML.
 - Rejects stale updates so concurrent work cannot silently overwrite newer content.
-- Lets connected AI clients draw and refine native diagrams with tldraw; diagrams share content history and support zoom, fullscreen, text alternatives and PNG export.
+- Lets connected AI clients draw and refine native diagrams with Excalidraw; diagrams share content history and support zoom, fullscreen, text alternatives and PNG export.
 - Provides comments, historical previews, restoration and original HTML/Markdown file export.
 - Includes administrator, editor and viewer accounts, plus scoped personal API keys.
 - Exposes REST with a public OpenAPI reference, and MCP for connected AI clients.
@@ -139,4 +139,4 @@ Open a plan's **Visualisering** tab, choose **Visualisera med AI**, describe the
 
 The canvas stores bounded geometry and literal text, not arbitrary HTML. Use the text view, pan/zoom, fullscreen and PNG download to inspect or share a diagram. Files and diagrams restore together. SDK assets are self-hosted and Node.js 22.12.0 or later within Node 22 is required.
 
-**Production licensing:** tldraw has separate SDK license requirements. Configure `TLDRAW_LICENSE_KEY` for production; see [tldraw licensing](https://tldraw.dev/pricing) and [deployment](docs/DEPLOYMENT.md). Planroom remains MIT-licensed, while this dependency retains its own terms.
+The embedded [Excalidraw SDK](https://github.com/excalidraw/excalidraw) is MIT-licensed and requires no production license key or subscription. Diagram fonts are served locally; see [deployment](docs/DEPLOYMENT.md). Planroom owns the saved diagram format and history independently of the SDK.

@@ -295,8 +295,5 @@ export const documentCanvasSchema = z.object({
   status: statusSchema,
   canvas: canvasSchema.nullable(),
 });
-export const canvasConfigurationSchema = z.object({
-  licenseKey: z.string().nullable(),
-});
 export type CanvasUpdate = z.infer<typeof updateCanvasSchema>;
 export type DocumentCanvas = z.infer<typeof documentCanvasSchema>;

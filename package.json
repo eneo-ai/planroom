@@ -34,17 +34,16 @@
   "dependencies": {
     "@astryxdesign/core": "0.6.3",
     "@astryxdesign/theme-neutral": "0.6.3",
+    "@excalidraw/excalidraw": "0.18.1",
     "@modelcontextprotocol/sdk": "1.31.0",
     "@scalar/api-reference-react": "0.9.76",
     "@stylexjs/stylex": "0.19.1",
-    "@tldraw/assets": "5.5.0",
     "lucide-react": "^0.577.0",
     "marked": "18.0.14",
     "next": "16.3.7",
     "pg": "8.23.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "tldraw": "5.5.0",
     "tsx": "^4.21.0",
     "zod": "4.6.5"
   },
@@ -54,12 +53,21 @@
     "@types/pg": "^8.15.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "happy-dom": "20.14.5",
     "parse5": "^8.0.1",
     "prettier": "^3.9.9",
     "typescript": "7.0.2",
     "vitest": "5.0.3"
   },
   "overrides": {
+    "@excalidraw/excalidraw": {
+      "nanoid": "3.3.19",
+      "@radix-ui/react-tabs": "1.1.21"
+    },
+    "@excalidraw/mermaid-to-excalidraw": {
+      "nanoid": "5.1.16"
+    },
+    "lodash-es": "4.18.1",
     "@ai-sdk/provider-utils": "4.0.33",
     "undici": "7.30.0"
   }

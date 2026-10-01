@@ -4,6 +4,9 @@
 !package.json
 !package-lock.json
 !LICENSE
+!third-party/
+!third-party/excalidraw/
+!third-party/excalidraw/LICENSE
 !next.config.ts
 !next-env.d.ts
 !tsconfig.json

@@ -1,14 +1,18 @@
-import { cp, mkdir } from "node:fs/promises";
+import { cp, mkdir, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
-// Serve the pinned SDK's fonts/icons/translations locally, including in Docker.
-const source = new URL("../node_modules/@tldraw/assets/", import.meta.url);
-const destination = new URL("../public/tldraw/", import.meta.url);
+// Serve the pinned SDK's fonts locally and preserve its license in Docker.
+const source = new URL(
+  "../node_modules/@excalidraw/excalidraw/dist/prod/fonts/",
+  import.meta.url,
+);
+const destination = new URL("../public/excalidraw/fonts/", import.meta.url);
+await rm(destination, { recursive: true, force: true });
 await mkdir(destination, { recursive: true });
-for (const directory of ["fonts", "icons", "translations", "embed-icons"]) {
-  await cp(
-    fileURLToPath(new URL(directory, source)),
-    fileURLToPath(new URL(directory, destination)),
-    { recursive: true },
-  );
-}
+await cp(fileURLToPath(source), fileURLToPath(destination), {
+  recursive: true,
+});
+await cp(
+  new URL("../third-party/excalidraw/LICENSE", import.meta.url),
+  new URL("../public/excalidraw/LICENSE", import.meta.url),
+);

@@ -17,4 +17,4 @@ AGENTS.local.md
 *.pfx
 
 # Copied from the pinned SDK during npm install/build.
-/public/tldraw/
+/public/excalidraw/

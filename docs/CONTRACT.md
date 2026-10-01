@@ -67,4 +67,4 @@ Operations are `upsert` with a complete shape, `remove` with an existing id, or 
 
 MCP read_canvas exposes the read contract. apply_canvas_operations adds document `id` to the POST contract and is advertised only for write-scoped admin/editor identities. The visualize_plan prompt takes documentId/request and shares the product's drawing workflow. AI should read read_document and read_canvas before drawing, preserve original files and unrelated shapes, batch coherent edits, use consistent visual hierarchy, and reread/reconcile after conflicts.
 
-`GET /api/canvas/config` is authenticated and returns `{licenseKey: string|null}` from TLDRAW_LICENSE_KEY. This key is intended for browser SDK validation, not model-provider authentication. Development can use the SDK without a production key; production requires an appropriate tldraw license.
+The Excalidraw renderer consumes Planroom's portable canvas contract. No SDK license configuration endpoint or key is required; SDK-specific scene state is never persisted or accepted through HTTP/MCP.
