@@ -64,6 +64,10 @@ jobs:
           docker compose up --no-build --wait --wait-timeout 90
           curl --fail --max-time 5 http://localhost:3210/api/health
           curl --fail --max-time 5 --output /dev/null http://localhost:3210/login
+          curl --fail --max-time 5 --output /dev/null http://localhost:3210/excalidraw/LICENSE
+          for font_file in public/excalidraw/fonts/Nunito/*.woff2; do
+            curl --fail --max-time 5 --output /dev/null "http://localhost:3210/${font_file#public/}"
+          done
       - name: Show bounded startup diagnostics on failure
         if: failure()
         run: |
