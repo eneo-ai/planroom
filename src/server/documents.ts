@@ -5,6 +5,7 @@ import {
 } from "../canvas";
 import type { CanvasUpdate, DocumentCanvas } from "../contracts";
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import type { PoolClient } from "pg";
 import type {
   Comment,
@@ -257,8 +258,8 @@ async function writeDocument(
           file.content !== previous.content
         );
       });
-    const canvasChanged =
-      JSON.stringify(content.canvas) !== JSON.stringify(current.canvas);
+    // JSONB reorders object keys; key order must not manufacture revisions.
+    const canvasChanged = !isDeepStrictEqual(content.canvas, current.canvas);
     const contentChanged = filesChanged || canvasChanged;
     const metadataChanged =
       content.title !== current.title ||
