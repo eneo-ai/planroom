@@ -55,15 +55,75 @@ describe("MCP permissions through the official SDK", () => {
         "list_revisions",
         "read_revision",
         "read_comments",
+        "read_canvas",
       ]);
       for (const name of [
         "update_document",
         "update_document_status",
         "update_document_github_links",
+        "apply_canvas_operations",
       ]) {
         const result = await session.client.callTool({ name, arguments: {} });
         expect(result.isError).toBe(true);
       }
+    } finally {
+      await session.close();
+    }
+  });
+  it("exposes revision-safe canvas drawing and a reusable visualization prompt", async () => {
+    const session = await connect({ ...principal, scope: "write" });
+    try {
+      const tool = (await session.client.listTools()).tools.find(
+        (entry) => entry.name === "apply_canvas_operations",
+      );
+      expect(tool?.inputSchema.required).toEqual(
+        expect.arrayContaining([
+          "id",
+          "expectedVersion",
+          "changeSummary",
+          "operations",
+        ]),
+      );
+      expect(tool?.annotations?.readOnlyHint).toBe(false);
+      for (const input of [
+        { operations: [{ action: "rename", title: "Architecture" }] },
+        {
+          expectedVersion: 1,
+          operations: [
+            {
+              action: "upsert",
+              shape: {
+                id: "unsafe",
+                type: "embed",
+                html: "<script>evil()</script>",
+              },
+            },
+          ],
+        },
+      ])
+        expect(
+          (
+            await session.client.callTool({
+              name: "apply_canvas_operations",
+              arguments: {
+                id: principal.user.id,
+                changeSummary: "Draw",
+                ...input,
+              },
+            })
+          ).isError,
+        ).toBe(true);
+      const prompt = await session.client.getPrompt({
+        name: "visualize_plan",
+        arguments: {
+          documentId: principal.user.id,
+          request: "Show architecture",
+        },
+      });
+      expect(prompt.messages[0].content).toMatchObject({
+        type: "text",
+        text: expect.stringContaining("apply_canvas_operations"),
+      });
     } finally {
       await session.close();
     }

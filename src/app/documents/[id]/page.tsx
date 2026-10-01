@@ -18,6 +18,7 @@ import {
   History,
   LockKeyhole,
   Github,
+  Sparkles,
 } from "lucide-react";
 import {
   documentContentSchema,
@@ -40,6 +41,7 @@ import { DocumentFields } from "@/components/document-fields";
 import { PlanningFileImport } from "@/components/document-files";
 import { PlanningFileViewer } from "@/components/planning-file-viewer";
 import { DocumentComments } from "@/components/document-comments";
+import { DocumentCanvas } from "@/components/document-canvas";
 import { DocumentHistory } from "@/components/document-history";
 import { useSession } from "@/components/session";
 import {
@@ -123,6 +125,13 @@ export default function DocumentPage() {
       setError("");
     },
     [setDraft],
+  );
+  const acceptCanvasUpdate = useCallback(
+    (next: DocumentDetail) => {
+      if (next.id === id && next.version > (document?.version ?? 0))
+        accept(next, true);
+    },
+    [accept, id, document?.version],
   );
   const load = useCallback(
     async (signal?: AbortSignal, preserveDraft = false) => {
@@ -253,6 +262,7 @@ export default function DocumentPage() {
   const activeTab = tab === "edit" && !showEditor ? "preview" : tab;
   const tabs = [
     { value: "preview", label: "Planering", icon: Eye },
+    { value: "canvas", label: "Visualisering", icon: Sparkles },
     ...(showEditor
       ? [
           {
@@ -297,7 +307,7 @@ export default function DocumentPage() {
           <h1>{document.title}</h1>
           <p className="muted">{document.description}</p>
           <p className="revision-caption">
-            Filrevision {document.currentRevision} · Uppdaterad{" "}
+            Innehållsrevision {document.currentRevision} · Uppdaterad{" "}
             {formatDate(document.updatedAt)} av {document.authorName}
           </p>
           <GitHubReferences links={document.githubLinks} />
@@ -400,6 +410,15 @@ export default function DocumentPage() {
           title={document.title}
         />
       </section>
+      {activeTab === "canvas" && (
+        <section role="tabpanel" id="panel-canvas" aria-labelledby="tab-canvas">
+          <DocumentCanvas
+            document={document}
+            canWrite={canWrite}
+            onUpdated={acceptCanvasUpdate}
+          />
+        </section>
+      )}
       {showEditor && (
         <section
           hidden={activeTab !== "edit"}
@@ -445,8 +464,8 @@ export default function DocumentPage() {
             />
             <div className="form-actions">
               <p className="muted">
-                Ändringar i fillistan skapar en ny revision. Metadata sparas i
-                den aktuella planen.
+                Ändringar i filer eller visualisering skapar en ny revision.
+                Metadata sparas i den aktuella planen.
               </p>
               <Button
                 label="Spara ändringar"

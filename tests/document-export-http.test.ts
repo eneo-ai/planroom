@@ -12,6 +12,7 @@ const document = documentDetailSchema.parse({
   status: "draft",
   githubLinks: [],
   currentRevision: 1,
+  canvas: null,
   version: 1,
   githubLinksVersion: 1,
   authorName: "Editor",

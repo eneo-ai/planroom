@@ -127,3 +127,13 @@ Official Node/PostgreSQL base images and GitHub Actions are pinned to verified d
 The bundled Scalar reference is client-only; fonts, telemetry, hosted agents and proxy services are disabled. Its transitive dependencies pin older Undici and AI SDK provider utilities. `package.json` selects patched Undici 7.30.0 and `@ai-sdk/provider-utils` 4.0.33 within their existing major lines. Both support Node.js 22. The provider utilities update addresses [GHSA-866g-f22w-33x8](https://github.com/advisories/GHSA-866g-f22w-33x8).
 
 The reference integration owns these overrides. Remove each when Scalar's selected dependency tree resolves a patched version without it, after checking the complete npm audit and reference transport tests. CI fails on advisories of any reported severity, including development dependencies. No automatic `audit --force` downgrade is used.
+
+## Native AI diagram SDK
+
+Planroom includes tldraw 5.5.0 and serves its pinned fonts/icons/translations from `/tldraw/`. Node.js must be at least 22.12.0 within Node 22. `npm ci` and the production build copy these assets automatically; Docker includes the asset preparation script in the dependency stage and the generated public assets in the final image. No CDN is required for diagram resources.
+
+Before using the SDK in production, obtain an appropriate license from https://tldraw.dev/pricing and configure `TLDRAW_LICENSE_KEY` in the application's runtime environment. Compose forwards this optional variable. The authenticated configuration endpoint delivers it to the browser as intended by the SDK. It is not an AI-provider secret. Local development does not need a production key. Planroom's MIT license does not change the SDK's separate license requirements.
+
+AI drawing uses existing personal write-scoped MCP keys and connected clients. No model-provider credential or AI service is added. In the plan's Visualisering tab, choose Visualisera med AI, copy the assignment and submit it to the connected client. The active tab refreshes every three seconds after completed reads, backing off on failure and skipping reads while the browser tab is hidden. Leaving the view aborts reads and timers. Each saved AI batch is durable and conflict-safe; there is no separately operated WebSocket/synchronization service.
+
+Migration 007 adds nullable canvas snapshots to content revisions without rewriting file sources. Include those JSONB snapshots in existing database backups. Retain a matching backup/image before migration; an older writer would omit diagram data from new revisions, so pause writes before rollback. PNG download is bounded to approximately 4000 pixels per edge. Portable geometry/text remains in database history independently of the SDK version.

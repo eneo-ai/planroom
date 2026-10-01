@@ -26,6 +26,7 @@ Developed for shared planning at **Sundsvalls kommun**, Sweden. The repository i
 - Combines HTML and Markdown files on one planning card, preserving original sources, CSS and inline SVG.
 - Stores immutable HTML revisions with a metadata snapshot; status, instructions and GitHub references can change without duplicating HTML.
 - Rejects stale updates so concurrent work cannot silently overwrite newer content.
+- Lets connected AI clients draw and refine native diagrams with tldraw; diagrams share content history and support zoom, fullscreen, text alternatives and PNG export.
 - Provides comments, historical previews, restoration and original HTML/Markdown file export.
 - Includes administrator, editor and viewer accounts, plus scoped personal API keys.
 - Exposes REST with a public OpenAPI reference, and MCP for connected AI clients.
@@ -131,3 +132,11 @@ Useful documentation:
 ---
 
 Copyright © 2026 **Sundsvalls kommun and Planroom contributors**. Distributed under the [MIT License](LICENSE).
+
+## AI-generated visualizations
+
+Open a plan's **Visualisering** tab, choose **Visualisera med AI**, describe the diagram and copy the assignment into a connected Codex or other MCP client with a write key. The AI reads the plan and draws native objects through `read_canvas` and `apply_canvas_operations`. The MCP `visualize_plan` prompt provides the same workflow. The diagram updates automatically in the active view; subsequent requests can refine individual objects. Original HTML/Markdown files stay intact and every changed batch is saved in content history. Frozen plans remain read-only. This uses your existing AI client; Planroom does not invoke a model internally.
+
+The canvas stores bounded geometry and literal text, not arbitrary HTML. Use the text view, pan/zoom, fullscreen and PNG download to inspect or share a diagram. Files and diagrams restore together. SDK assets are self-hosted and Node.js 22.12.0 or later within Node 22 is required.
+
+**Production licensing:** tldraw has separate SDK license requirements. Configure `TLDRAW_LICENSE_KEY` for production; see [tldraw licensing](https://tldraw.dev/pricing) and [deployment](docs/DEPLOYMENT.md). Planroom remains MIT-licensed, while this dependency retains its own terms.

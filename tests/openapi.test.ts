@@ -161,6 +161,7 @@ describe("published REST API contracts", () => {
       githubLinksVersion: 1,
       version: 1,
       currentRevision: 1,
+      canvas: null,
       authorName: user.name,
       createdAt: "2026-09-30T10:00:00.000Z",
       updatedAt: "2026-09-30T10:00:00.000Z",

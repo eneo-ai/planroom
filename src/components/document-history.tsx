@@ -14,6 +14,7 @@ import type {
 } from "@/contracts";
 import { api, errorMessage } from "@/client/api";
 import { formatDate, statuses } from "@/client/document-format";
+import { CanvasViewer } from "./canvas-viewer";
 import { GitHubReferences } from "./document-github-links";
 import { PlanningFileViewer } from "./planning-file-viewer";
 
@@ -191,6 +192,7 @@ export function DocumentHistory({
             files={selected.files}
             title={`${selected.title} · version ${selected.number}`}
           />
+          {selected.canvas && <CanvasViewer canvas={selected.canvas} />}
           <TextArea
             label="AI-instruktioner i denna version"
             value={selected.instructions}

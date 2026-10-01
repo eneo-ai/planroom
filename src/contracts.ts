@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { canvasSchema, canvasOperationSchema } from "./canvas";
 import { githubLinksInputSchema, githubLinksSchema } from "./github-links";
 
 export const roleSchema = z.enum(["admin", "editor", "viewer"]);
@@ -125,6 +126,7 @@ export const documentDetailSchema = documentSummarySchema.extend({
   files: z.array(planningFileSchema),
   instructions: z.string(),
   changeSummary: z.string(),
+  canvas: canvasSchema.nullable(),
 });
 export const revisionSummarySchema = z.object({
   id: z.uuid(),
@@ -140,6 +142,7 @@ export const revisionDetailSchema = revisionSummarySchema.extend({
   instructions: z.string(),
   status: statusSchema,
   githubLinks: githubLinksSchema,
+  canvas: canvasSchema.nullable(),
 });
 export const documentGitHubLinksSchema = z.object({
   githubLinks: githubLinksSchema,
@@ -279,3 +282,21 @@ export type DocumentGitHubLinksUpdate = z.infer<
 >;
 
 export type RestoreInput = z.infer<typeof restoreSchema>;
+
+export const updateCanvasSchema = z.strictObject({
+  expectedVersion: revisionNumberSchema,
+  changeSummary: z.string().trim().min(1).max(1000),
+  operations: z.array(canvasOperationSchema).min(1).max(300),
+});
+export const documentCanvasSchema = z.object({
+  documentId: z.uuid(),
+  version: revisionNumberSchema,
+  currentRevision: revisionNumberSchema,
+  status: statusSchema,
+  canvas: canvasSchema.nullable(),
+});
+export const canvasConfigurationSchema = z.object({
+  licenseKey: z.string().nullable(),
+});
+export type CanvasUpdate = z.infer<typeof updateCanvasSchema>;
+export type DocumentCanvas = z.infer<typeof documentCanvasSchema>;

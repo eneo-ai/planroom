@@ -20,6 +20,8 @@ import {
   type Principal,
 } from "../src/server/auth";
 import {
+  getDocumentCanvas,
+  updateDocumentCanvas,
   createDocument,
   getDocument,
   getRevision,
@@ -34,6 +36,8 @@ import {
 } from "../src/server/documents";
 import { AppError } from "../src/server/errors";
 import { documentContentSchema, planningFilesSchema } from "../src/contracts";
+import { createPlanroomServer } from "../src/mcp/server";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
@@ -1297,6 +1301,241 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     expect(await listRevisions(principal, document.id)).toHaveLength(1);
     expect(await listComments(principal, document.id)).toEqual([]);
     await deleteToken(principal, key.record.id);
+  });
+  it("saves AI diagrams in content history, preserves original sources and restores the complete content", async () => {
+    const original = await createDocument(principal, content);
+    expect(original.canvas).toBeNull();
+    const operations = [
+      {
+        action: "upsert" as const,
+        shape: {
+          id: "source",
+          type: "rectangle" as const,
+          text: "Source",
+          x: 0,
+          y: 0,
+          width: 240,
+          height: 120,
+          color: "blue" as const,
+        },
+      },
+      {
+        action: "upsert" as const,
+        shape: {
+          id: "target",
+          type: "ellipse" as const,
+          text: "Target",
+          x: 400,
+          y: 0,
+          width: 240,
+          height: 120,
+          color: "green" as const,
+        },
+      },
+      {
+        action: "upsert" as const,
+        shape: {
+          id: "flow",
+          type: "arrow" as const,
+          startId: "source",
+          endId: "target",
+          text: "Data",
+          color: "neutral" as const,
+        },
+      },
+    ];
+    const drawn = await updateDocumentCanvas(principal, original.id, {
+      expectedVersion: original.version,
+      changeSummary: "Visualize source flow",
+      operations,
+    });
+    expect(drawn).toMatchObject({ currentRevision: 2, version: 2 });
+    const latest = await getDocument(principal, original.id);
+    expect(latest.files).toEqual(content.files);
+    expect(latest.canvas?.shapes).toHaveLength(3);
+    expect((await getRevision(principal, original.id, 1)).canvas).toBeNull();
+    expect((await getRevision(principal, original.id, 2)).canvas).toEqual(
+      drawn.canvas,
+    );
+    expect(
+      await updateDocumentCanvas(principal, original.id, {
+        expectedVersion: 2,
+        changeSummary: "Identical diagram",
+        operations,
+      }),
+    ).toEqual(drawn);
+    expect(await listRevisions(principal, original.id)).toHaveLength(2);
+    const textChanged = await updateDocument(principal, original.id, {
+      ...content,
+      files: [{ ...content.files[0], content: "<p>Updated original</p>" }],
+      expectedVersion: 2,
+    });
+    expect(textChanged.canvas).toEqual(drawn.canvas);
+    const restored = await restoreDocument(principal, original.id, 1, {
+      expectedVersion: textChanged.version,
+      changeSummary: "Restore before the diagram",
+    });
+    expect(restored.canvas).toBeNull();
+    expect(restored.files).toEqual(content.files);
+    expect(restored.currentRevision).toBe(4);
+    expect((await getRevision(principal, original.id, 2)).canvas).toEqual(
+      drawn.canvas,
+    );
+  });
+  it("rejects malformed, stale, frozen and read-only canvas writes atomically", async () => {
+    const original = await createDocument(principal, content);
+    const input = {
+      expectedVersion: original.version,
+      changeSummary: "Draw",
+      operations: [{ action: "rename" as const, title: "Architecture" }],
+    };
+    await expect(
+      updateDocumentCanvas({ ...principal, scope: "read" }, original.id, input),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      updateDocumentCanvas(principal, original.id, {
+        ...input,
+        operations: [
+          {
+            action: "upsert",
+            shape: {
+              type: "arrow",
+              id: "bad",
+              startId: "missing",
+              endId: "absent",
+              text: "",
+              color: "neutral",
+            },
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_CANVAS_OPERATION" });
+    expect((await getDocumentCanvas(principal, original.id)).canvas).toBeNull();
+    expect(await listRevisions(principal, original.id)).toHaveLength(1);
+    const raced = await Promise.allSettled([
+      updateDocumentCanvas(principal, original.id, input),
+      updateDocumentCanvas(principal, original.id, {
+        ...input,
+        operations: [{ action: "rename", title: "Alternative" }],
+      }),
+    ]);
+    expect(
+      raced.filter((result) => result.status === "fulfilled"),
+    ).toHaveLength(1);
+    expect(raced.find((result) => result.status === "rejected")).toMatchObject({
+      reason: { code: "DOCUMENT_CONFLICT" },
+    });
+    const current = await getDocument(principal, original.id);
+    for (const status of [
+      "ready",
+      "in_development",
+      "completed",
+      "archived",
+    ] as const) {
+      const live = await getDocument(principal, original.id);
+      const frozen = await updateDocumentStatus(principal, original.id, {
+        expectedVersion: live.version,
+        status,
+      });
+      await expect(
+        updateDocumentCanvas(principal, original.id, {
+          ...input,
+          expectedVersion: frozen.version,
+        }),
+      ).rejects.toMatchObject({ code: "DOCUMENT_LOCKED" });
+    }
+    expect((await getDocumentCanvas(principal, original.id)).canvas).toEqual(
+      current.canvas,
+    );
+    expect(await listRevisions(principal, original.id)).toHaveLength(2);
+  });
+  it("draws through the official MCP SDK and reads the same durable diagram", async () => {
+    const original = await createDocument(principal, content);
+    const key = await createToken(principal, {
+      name: "AI canvas SDK",
+      scope: "write",
+    });
+    const identity = await requirePrincipal(
+      new Request("http://localhost/api", {
+        headers: { authorization: `Bearer ${key.token}` },
+      }),
+      { tokenOnly: true },
+    );
+    const server = createPlanroomServer(identity);
+    const client = new Client({ name: "canvas-behavior-test", version: "1" });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      const response = await client.callTool({
+        name: "apply_canvas_operations",
+        arguments: {
+          id: original.id,
+          expectedVersion: original.version,
+          changeSummary: "AI draws architecture",
+          operations: [
+            {
+              action: "upsert",
+              shape: {
+                id: "service",
+                type: "rectangle",
+                text: "Service",
+                x: 0,
+                y: 0,
+              },
+            },
+          ],
+        },
+      });
+      expect(response.isError).not.toBe(true);
+      const read = CallToolResultSchema.parse(
+        await client.callTool({
+          name: "read_canvas",
+          arguments: { id: original.id },
+        }),
+      );
+      const block = read.content[0];
+      if (block.type !== "text") throw new Error("Expected native canvas JSON");
+      expect(JSON.parse(block.text)).toMatchObject({
+        currentRevision: 2,
+        version: 2,
+        canvas: {
+          schemaVersion: 1,
+          shapes: [{ id: "service", text: "Service", width: 240, height: 120 }],
+        },
+      });
+      expect((await getDocument(principal, original.id)).files).toEqual(
+        content.files,
+      );
+    } finally {
+      await client.close();
+      await server.close();
+      await deleteToken(principal, key.record.id);
+    }
+  });
+  it("rechecks revoked canvas credentials before saving", async () => {
+    const original = await createDocument(principal, content);
+    const key = await createToken(principal, {
+      name: "Canvas revocation",
+      scope: "write",
+    });
+    const cached = await requirePrincipal(
+      new Request("http://localhost/api", {
+        headers: { authorization: `Bearer ${key.token}` },
+      }),
+      { write: true },
+    );
+    await deleteToken(principal, key.record.id);
+    await expect(
+      updateDocumentCanvas(cached, original.id, {
+        expectedVersion: original.version,
+        changeSummary: "Revoked write",
+        operations: [{ action: "rename", title: "Denied" }],
+      }),
+    ).rejects.toMatchObject({ code: "UNAUTHENTICATED" });
+    expect((await getDocumentCanvas(principal, original.id)).canvas).toBeNull();
+    expect(await listRevisions(principal, original.id)).toHaveLength(1);
   });
   it("migrates every legacy HTML revision without source loss and keeps a stable file identity", async () => {
     const sql = await readFile(

@@ -1,0 +1,82 @@
+/* Product layout around Astryx controls and the SDK's isolated canvas surface. */
+.root {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+}
+.heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+}
+.headingText {
+  display: grid;
+  gap: 8px;
+  max-width: 680px;
+}
+.surface {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.stage {
+  position: relative;
+  height: clamp(420px, 62vh, 760px);
+  min-height: 360px;
+  overflow: hidden;
+  isolation: isolate;
+}
+.empty {
+  min-height: 340px;
+  display: grid;
+  align-items: center;
+}
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+}
+.composer {
+  display: grid;
+  gap: 24px;
+}
+.examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.textView {
+  display: grid;
+  gap: 16px;
+}
+.textView li {
+  margin-block: 8px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.expanded {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+.expanded .surface {
+  flex: 1;
+}
+.expanded .stage {
+  flex: 1;
+  height: auto;
+  min-height: 360px;
+}
+@media (max-width: 720px) {
+  .heading {
+    flex-direction: column;
+    gap: 16px;
+  }
+  .stage {
+    height: 55vh;
+  }
+}

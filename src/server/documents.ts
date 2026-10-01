@@ -1,3 +1,9 @@
+import {
+  applyCanvasOperations,
+  CanvasOperationError,
+  type Canvas,
+} from "../canvas";
+import type { CanvasUpdate, DocumentCanvas } from "../contracts";
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import type {
@@ -34,6 +40,7 @@ interface RevisionRow {
   title: string;
   description: string;
   files: PlanningFile[];
+  canvas: Canvas | null;
   instructions: string;
   status: DocumentStatus;
   github_links: string[];
@@ -65,7 +72,7 @@ type RevisionSummaryRow = Pick<
   RevisionRow,
   "id" | "number" | "title" | "change_summary" | "author_name" | "created_at"
 >;
-const currentSelect = `SELECT r.id,r.document_id,r.number,r.files,d.title,d.description,d.instructions,d.status,d.change_summary,d.version,d.github_links,d.github_links_version,u.name AS author_name,d.created_at AS document_created_at,d.updated_at FROM documents d JOIN document_revisions r ON r.document_id=d.id AND r.number=d.current_revision JOIN users u ON u.id=d.author_id`;
+const currentSelect = `SELECT r.id,r.document_id,r.number,r.files,r.canvas,d.title,d.description,d.instructions,d.status,d.change_summary,d.version,d.github_links,d.github_links_version,u.name AS author_name,d.created_at AS document_created_at,d.updated_at FROM documents d JOIN document_revisions r ON r.document_id=d.id AND r.number=d.current_revision JOIN users u ON u.id=d.author_id`;
 const summarySelect = `SELECT (SELECT jsonb_agg(file - 'content' ORDER BY ordinal) FROM jsonb_array_elements(r.files) WITH ORDINALITY AS entries(file, ordinal)) AS files,d.id AS document_id,d.current_revision AS number,d.title,d.description,d.status,d.version,d.github_links,d.github_links_version,u.name AS author_name,d.created_at AS document_created_at,d.updated_at FROM documents d JOIN document_revisions r ON r.document_id=d.id AND r.number=d.current_revision JOIN users u ON u.id=d.author_id`;
 function summary(row: SummaryRow): DocumentSummary {
   return {
@@ -89,6 +96,7 @@ function detail(row: DocumentRow): DocumentDetail {
     files: row.files,
     instructions: row.instructions,
     changeSummary: row.change_summary,
+    canvas: row.canvas,
   };
 }
 function revisionSummary(row: RevisionSummaryRow): RevisionSummary {
@@ -109,6 +117,7 @@ function revisionDetail(row: RevisionRow): RevisionDetail {
     instructions: row.instructions,
     status: row.status,
     githubLinks: row.github_links,
+    canvas: row.canvas,
   };
 }
 async function fetchDocument(
@@ -146,9 +155,10 @@ async function insertRevision(
   number: number,
   content: DocumentContent,
   githubLinks: string[],
+  canvas: Canvas | null,
 ): Promise<void> {
   await client.query(
-    "INSERT INTO document_revisions(id,document_id,number,title,description,files,instructions,status,change_summary,author_id,github_links) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11)",
+    "INSERT INTO document_revisions(id,document_id,number,title,description,files,instructions,status,change_summary,author_id,github_links,canvas) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12::jsonb)",
     [
       randomUUID(),
       id,
@@ -161,6 +171,7 @@ async function insertRevision(
       content.changeSummary,
       author.id,
       githubLinks,
+      canvas === null ? null : JSON.stringify(canvas),
     ],
   );
 }
@@ -196,7 +207,7 @@ export async function createDocumentInTransaction(
       author.id,
     ],
   );
-  await insertRevision(client, author, id, 1, content, []);
+  await insertRevision(client, author, id, 1, content, [], null);
   return fetchDocument(client, id);
 }
 async function lockDocument(
@@ -227,7 +238,7 @@ async function writeDocument(
   change: (
     current: DocumentDetail,
     client: PoolClient,
-  ) => Promise<DocumentContent>,
+  ) => Promise<DocumentContent & { canvas: Canvas | null }>,
 ): Promise<DocumentDetail> {
   assertWrite(principal);
   return transaction(async (client) => {
@@ -246,15 +257,18 @@ async function writeDocument(
           file.content !== previous.content
         );
       });
+    const canvasChanged =
+      JSON.stringify(content.canvas) !== JSON.stringify(current.canvas);
+    const contentChanged = filesChanged || canvasChanged;
     const metadataChanged =
       content.title !== current.title ||
       content.description !== current.description ||
       content.instructions !== current.instructions ||
       content.status !== current.status;
     // An identical save is not a new edit, even if its summary differs.
-    if (!filesChanged && !metadataChanged) return current;
-    const number = current.currentRevision + (filesChanged ? 1 : 0);
-    if (filesChanged)
+    if (!contentChanged && !metadataChanged) return current;
+    const number = current.currentRevision + (contentChanged ? 1 : 0);
+    if (contentChanged)
       await insertRevision(
         client,
         verified.user,
@@ -262,6 +276,7 @@ async function writeDocument(
         number,
         content,
         current.githubLinks,
+        content.canvas,
       );
     await client.query(
       "UPDATE documents SET current_revision=$2,title=$3,description=$4,instructions=$5,status=$6,change_summary=$7,author_id=$8,version=version+1,updated_at=now() WHERE id=$1",
@@ -301,7 +316,7 @@ export async function updateDocument(
     content.expectedVersion,
     async (current) => {
       assertContentEditable(current);
-      return content;
+      return { ...content, canvas: current.canvas };
     },
   );
 }
@@ -441,6 +456,7 @@ export async function restoreDocument(
         title: source.title,
         description: source.description,
         files: source.files,
+        canvas: source.canvas,
         instructions: source.instructions,
         status: source.status,
         changeSummary: input.changeSummary,
@@ -494,4 +510,68 @@ export async function addComment(
     );
     return comment(result.rows[0]);
   });
+}
+
+function canvasDetail(document: DocumentDetail): DocumentCanvas {
+  return {
+    documentId: document.id,
+    version: document.version,
+    currentRevision: document.currentRevision,
+    status: document.status,
+    canvas: document.canvas,
+  };
+}
+export async function getDocumentCanvas(
+  principal: Principal,
+  id: string,
+): Promise<DocumentCanvas> {
+  assertReady(principal);
+  const result = await db.query<{
+    version: number;
+    current_revision: number;
+    status: DocumentStatus;
+    canvas: Canvas | null;
+  }>(
+    "SELECT d.version,d.current_revision,d.status,r.canvas FROM documents d JOIN document_revisions r ON r.document_id=d.id AND r.number=d.current_revision WHERE d.id=$1",
+    [id],
+  );
+  const row = result.rows[0];
+  if (!row) notFound();
+  return {
+    documentId: id,
+    version: row.version,
+    currentRevision: row.current_revision,
+    status: row.status,
+    canvas: row.canvas,
+  };
+}
+export async function updateDocumentCanvas(
+  principal: Principal,
+  id: string,
+  input: CanvasUpdate,
+): Promise<DocumentCanvas> {
+  const updated = await writeDocument(
+    principal,
+    id,
+    input.expectedVersion,
+    async (current) => {
+      assertContentEditable(current);
+      try {
+        return {
+          ...current,
+          changeSummary: input.changeSummary,
+          canvas: applyCanvasOperations(
+            current.canvas,
+            current.title,
+            input.operations,
+          ),
+        };
+      } catch (error) {
+        if (error instanceof CanvasOperationError)
+          throw new AppError(400, "INVALID_CANVAS_OPERATION", error.message);
+        throw error;
+      }
+    },
+  );
+  return canvasDetail(updated);
 }

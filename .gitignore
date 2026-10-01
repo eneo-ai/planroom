@@ -15,3 +15,6 @@ AGENTS.local.md
 *.key
 *.p12
 *.pfx
+
+# Copied from the pinned SDK during npm install/build.
+/public/tldraw/

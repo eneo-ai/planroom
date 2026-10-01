@@ -2,6 +2,7 @@
 FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c AS dependencies
 WORKDIR /app
 COPY package.json package-lock.json ./
+COPY scripts/copy-canvas-assets.mjs ./scripts/copy-canvas-assets.mjs
 RUN npm ci --no-audit --no-fund
 
 FROM dependencies AS builder
@@ -34,6 +35,7 @@ COPY --from=builder --chown=planroom:planroom /app/scripts ./scripts
 COPY --from=builder --chown=planroom:planroom /app/src/server ./src/server
 COPY --from=builder --chown=planroom:planroom /app/src/contracts.ts ./src/contracts.ts
 COPY --from=builder --chown=planroom:planroom /app/src/github-links.ts ./src/github-links.ts
+COPY --from=builder --chown=planroom:planroom /app/src/canvas.ts ./src/canvas.ts
 COPY --from=builder --chown=planroom:planroom /app/migrations ./migrations
 COPY --from=builder --chown=planroom:planroom /app/examples ./examples
 COPY --from=builder --chown=planroom:planroom /app/tsconfig.json ./tsconfig.json

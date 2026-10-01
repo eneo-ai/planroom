@@ -1,5 +1,8 @@
 import { z } from "zod";
 import {
+  updateCanvasSchema,
+  documentCanvasSchema,
+  canvasConfigurationSchema,
   apiDiscoverySchema,
   apiErrorBodySchema,
   apiTokenSchema,
@@ -101,6 +104,7 @@ interface OpenApiDocument {
 }
 
 const requestSchemas = {
+  CanvasUpdate: updateCanvasSchema,
   LoginRequest: loginSchema,
   SetupRequest: setupSchema,
   CreateUserRequest: createUserSchema,
@@ -113,6 +117,8 @@ const requestSchemas = {
   CreateTokenRequest: createTokenSchema,
 };
 const responseSchemas = {
+  DocumentCanvas: documentCanvasSchema,
+  CanvasConfiguration: canvasConfigurationSchema,
   User: userSchema,
   DocumentSummary: documentSummarySchema,
   DocumentDetail: documentDetailSchema,
@@ -161,7 +167,7 @@ const security = {
   public: [],
 } satisfies Record<string, SecurityRequirement[]>;
 const errorDescriptions: Record<number, string> = {
-  400: "VALIDATION_ERROR, INVALID_JSON, INVALID_ID, INVALID_REVISION or REQUEST_ABORTED. Multi-file export without fileId returns FILE_REQUIRED. Account updates can also return PASSWORD_UNCHANGED or EMAIL_UNCHANGED.",
+  400: "VALIDATION_ERROR, INVALID_JSON, INVALID_ID, INVALID_REVISION, INVALID_CANVAS_OPERATION or REQUEST_ABORTED. Multi-file export without fileId returns FILE_REQUIRED. Account updates can also return PASSWORD_UNCHANGED or EMAIL_UNCHANGED.",
   401: "UNAUTHENTICATED or INVALID_CREDENTIALS. The session/token is missing, expired or revoked, or the supplied password is incorrect.",
   403: "FORBIDDEN, ACCOUNT_SETUP_REQUIRED, SESSION_REQUIRED or INVALID_ORIGIN. Complete account setup, use the required role/scope, or send a same-origin session request.",
   404: "NOT_FOUND. The document, planning file or historical revision does not exist.",
@@ -219,7 +225,7 @@ const optionalOrigin: Parameter = {
 const ready =
   " All document and token operations require mustChangePassword=false. Complete POST /api/auth/setup before accessing the workspace.";
 const writes =
-  " Requires admin/editor role and, for bearer authentication, a write-scope API key. Cookie-authenticated writes require a same-origin Origin header. Changes are saved immediately. Only a changed file collection creates a revision; changeSummary describes the change.";
+  " Requires admin/editor role and, for bearer authentication, a write-scope API key. Cookie-authenticated writes require a same-origin Origin header. Changes are saved immediately. Changed file collections or canvas content create a revision; changeSummary describes the change.";
 
 export const apiDiscovery = apiDiscoverySchema.parse({
   name: "Planroom REST API",
@@ -279,6 +285,52 @@ export const openApiDocument: OpenApiDocument = {
     },
   ],
   paths: {
+    "/api/canvas/config": {
+      get: {
+        operationId: "getCanvasConfiguration",
+        summary: "Read canvas SDK configuration",
+        description:
+          "Authenticated public browser configuration: the tldraw production license key, or null in development. This is not an AI provider credential.",
+        tags: ["Documents"],
+        security: security.document,
+        responses: {
+          "200": jsonResponse("Canvas configuration.", "CanvasConfiguration"),
+          ...errors(401, 403, 500),
+        },
+      },
+    },
+    "/api/documents/{id}/canvas": {
+      get: {
+        operationId: "readCanvas",
+        summary: "Read the AI visualization",
+        description:
+          "Read typed geometry and text, document version and lifecycle status without original file bodies. A null canvas means no diagram yet.",
+        tags: ["Documents"],
+        security: security.document,
+        parameters: [id],
+        responses: {
+          "200": jsonResponse("Current diagram.", "DocumentCanvas"),
+          ...errors(400, 401, 403, 404, 500),
+        },
+      },
+      post: {
+        operationId: "applyCanvasOperations",
+        summary: "Draw or refine a visualization",
+        description:
+          "Atomic bounded upsert/remove/rename batch. Removes attached arrows with their node. Changed batches create one immutable content revision without changing original files. expectedVersion guards conflicts; draft/active only. Invalid references return INVALID_CANVAS_OPERATION without saving anything.",
+        tags: ["Documents"],
+        security: security.document,
+        parameters: [id, optionalOrigin],
+        requestBody: body("CanvasUpdate"),
+        responses: {
+          "200": jsonResponse(
+            "Saved diagram and document version.",
+            "DocumentCanvas",
+          ),
+          ...errors(400, 401, 403, 404, 408, 409, 413, 415, 500, 503),
+        },
+      },
+    },
     "/api": {
       get: {
         operationId: "discoverApi",
@@ -591,7 +643,7 @@ export const openApiDocument: OpenApiDocument = {
         operationId: "restoreRevision",
         summary: "Restore history as a new current revision",
         description:
-          "Copies the entire historical file collection and its title, description, status and instructions snapshot into the current plan. Creates a revision only when the file collection changes. Current GitHub references are retained. Existing history remains intact. The current plan must be draft or active; otherwise DOCUMENT_LOCKED requires explicitly reopening through the status endpoint first. expectedVersion protects the current document from concurrent overwrites; 409 includes error.currentVersion." +
+          "Copies the entire historical file collection and its title, description, status and instructions snapshot into the current plan. Creates a revision when files or canvas change. Restores the canvas snapshot too. Current GitHub references are retained. Existing history remains intact. The current plan must be draft or active; otherwise DOCUMENT_LOCKED requires explicitly reopening through the status endpoint first. expectedVersion protects the current document from concurrent overwrites; 409 includes error.currentVersion." +
           ready +
           writes,
         tags: ["History"],
@@ -600,7 +652,7 @@ export const openApiDocument: OpenApiDocument = {
         requestBody: body("RestoreRequest"),
         responses: {
           "200": jsonResponse(
-            "Restored document; new revision only when the file collection changes.",
+            "Restored document; new revision when files or canvas change.",
             "DocumentDetail",
           ),
           ...errors(400, 401, 403, 404, 408, 409, 413, 415, 500, 503),
