@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c AS dependencies
+FROM node:26-bookworm-slim@sha256:662933cf47f013bc8e4beb31a6116448427a82057ba7c42c97e4c5ba766504c2 AS dependencies
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY scripts/copy-canvas-assets.mjs ./scripts/copy-canvas-assets.mjs
@@ -15,7 +15,7 @@ RUN mkdir -p public && npm run build
 FROM dependencies AS production-dependencies
 RUN npm prune --omit=dev --no-audit --no-fund
 
-FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c AS runner
+FROM node:26-bookworm-slim@sha256:662933cf47f013bc8e4beb31a6116448427a82057ba7c42c97e4c5ba766504c2 AS runner
 WORKDIR /app
 LABEL org.opencontainers.image.title="Planroom" \
       org.opencontainers.image.description="Shared HTML planning with version history, REST and MCP" \
