@@ -18,6 +18,10 @@ function anchors(node: Node): DefaultTreeAdapterMap["element"][] {
 function attribute(node: DefaultTreeAdapterMap["element"], name: string) {
   return node.attrs.find((attr) => attr.name === name)?.value;
 }
+function textContent(node: Node): string {
+  if (node.nodeName === "#text" && "value" in node) return node.value;
+  return "childNodes" in node ? node.childNodes.map(textContent).join("") : "";
+}
 const links = [
   "https://github.com/eneo-ai/planroom/issues/7",
   "https://github.com/eneo-ai/planroom/pull/8",
@@ -56,6 +60,9 @@ describe("planning action semantics", () => {
       "eneo-ai/planroom, Issue #7",
     );
     expect(attribute(references[1], "aria-label")).toContain("PR #8");
+    expect(textContent(references[0])).toContain("planroom");
+    expect(textContent(references[0])).toContain("Issue #7");
+    expect(textContent(references[1])).toContain("PR #8");
     for (const [index, reference] of references.entries()) {
       expect(attribute(reference, "href")).toBe(links[index]);
       expect(attribute(reference, "target")).toBe("_blank");
@@ -67,6 +74,23 @@ describe("planning action semantics", () => {
         React.createElement(GitHubReferences, { links: [] }),
       ),
     ).toBe("");
+  });
+  it("preserves full repository context and the visible PR number for long repository names", () => {
+    const repository = "a-very-long-repository-".repeat(6);
+    const [reference] = anchors(
+      parseFragment(
+        renderToStaticMarkup(
+          React.createElement(GitHubReferences, {
+            links: [`https://github.com/organisation/${repository}/pull/867`],
+          }),
+        ),
+      ),
+    );
+    expect(attribute(reference, "aria-label")).toBe(
+      `organisation/${repository}, PR #867 (öppnas i ny flik)`,
+    );
+    expect(textContent(reference)).toContain("PR #867");
+    expect(attribute(reference, "target")).toBe("_blank");
   });
   it("shows the complete list with repository context and gives viewers no mutation controls", () => {
     const markup = renderToStaticMarkup(

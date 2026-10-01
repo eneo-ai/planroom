@@ -93,3 +93,13 @@ Deliberately unchanged: original HTML, preview isolation, lifecycle locks, discu
 Validation: supervised focused contracts, OpenAPI, MCP, GitHub URL and export tests, formatting and TypeScript. PostgreSQL integration coverage proves metadata-only/no-op persistence, HTML snapshots, concurrent metadata and reference writes, frozen plans and migration backfill; run only when a disposable database is supplied. No server, E2E, full suite or production build.
 
 Risk/recovery: migration 005 backfills current metadata; historical HTML and metadata snapshots remain intact. Keep a database backup and previous image before deploying. An application rollback needs the matching pre-migration database: an old writer would ignore updated current metadata. Retain the added columns; do not run the old writer against the new schema. Current metadata and link versions start at 1; historical revision numbers remain unchanged.
+
+## Planning card hierarchy and GitHub link composition
+
+Problem: cards have excessive vertical spacing, repetitive footer text and GitHub references whose icon/text split across lines. This makes the planning list slower to scan.
+
+Owner: the dashboard owns card composition; document-github-links.tsx owns reference presentation. Keep both owners and reuse Astryx ClickableCard, Button and status controls. Extend the existing composition, grouping title/description and using compact library link-buttons for references; the complete reference list keeps its current owner. Remove the separate GitHub logo beside the list and the compact text-link branch that split icons from labels. No replacement controls or library focus/color overrides.
+
+Acceptance: compact, aligned card headers and footers; readable titles/descriptions; explicit repo plus PR/Issue number in each compact link; full repository and new-tab behavior remain accessible; at most two links plus the remaining count; long labels stay inside narrow cards. Card navigation, nested status/link interactions, metadata writes, HTML revisions and permissions deliberately do not change.
+
+Validation: supervised TypeScript, the existing document-action and GitHub contract tests, and formatting. Source review checks responsive wrapping, library-owned focus and independent nested links. No local server, browser/E2E test, full suite or production build. Risk/recovery: presentation only, with no migration; revert the UI commit to recover the previous composition.

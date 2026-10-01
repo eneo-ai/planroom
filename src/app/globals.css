@@ -154,41 +154,66 @@ select {
 }
 .document-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
   gap: 20px;
 }
 .document-card {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  min-height: 250px;
+  gap: 16px;
+  min-width: 0;
 }
 .document-card-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
 }
-.document-card-top > svg {
+.document-card-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--color-text-secondary);
+  font-size: 0.75rem;
 }
-.document-card h3 {
-  font-size: 1.12rem;
+.document-card-content {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
 }
-.document-card > p {
-  font-size: 0.86rem;
+.document-card-content h3 {
+  font-size: 1.0625rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.document-card-content p {
+  font-size: 0.84rem;
+  line-height: 1.6;
 }
 .document-card-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
   margin-top: auto;
-  padding-top: 18px;
-  border-top: 1px solid var(--color-border);
+  padding-top: 4px;
   color: var(--color-text-secondary);
   font-size: 0.72rem;
 }
+.document-card-meta {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .document-card-action {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 6px;
   color: var(--color-text-primary);
@@ -202,9 +227,37 @@ select {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.github-references > a {
+  max-width: 100%;
+}
+.github-reference-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  vertical-align: middle;
+}
+.github-reference-repo {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.github-reference-number {
+  flex-shrink: 0;
+}
+.github-reference-row {
+  display: inline-flex;
+  align-items: center;
   gap: 10px;
-  font-size: 0.8rem;
-  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.github-reference-row > svg {
+  flex-shrink: 0;
 }
 .github-link-list {
   list-style: none;

@@ -184,11 +184,13 @@ export default function Dashboard() {
                 key={document.id}
                 label={document.title}
                 href={`/documents/${document.id}`}
-                padding={6}
+                padding={5}
                 className="document-card"
               >
                 <div className="document-card-top">
-                  <FileText size={22} aria-hidden />
+                  <span className="document-card-kind">
+                    <FileText size={16} aria-hidden /> Planering
+                  </span>
                   {canWrite ? (
                     <DocumentStatusControl
                       document={document}
@@ -214,18 +216,18 @@ export default function Dashboard() {
                     <DocumentStatusBadge status={document.status} />
                   )}
                 </div>
-                <h3>{document.title}</h3>
-                <p className="muted clamp-3">
-                  {document.description || "Ingen beskrivning ännu."}
-                </p>
+                <div className="document-card-content">
+                  <h3 title={document.title}>{document.title}</h3>
+                  <p className="muted clamp-3">
+                    {document.description || "Ingen beskrivning ännu."}
+                  </p>
+                </div>
                 <GitHubReferences links={document.githubLinks} />
                 <div className="document-card-footer">
-                  <div>
-                    <span className="revision-caption">
-                      HTML-revision {document.currentRevision} ·{" "}
-                      {document.authorName}
+                  <div className="document-card-meta">
+                    <span>
+                      {document.authorName} · HTML v{document.currentRevision}
                     </span>
-                    <br />
                     <time dateTime={document.updatedAt}>
                       {formatDate(document.updatedAt)}
                     </time>

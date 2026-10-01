@@ -6,7 +6,14 @@ import { Button } from "@astryxdesign/core/Button";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Banner } from "@astryxdesign/core/Banner";
 import { TextInput } from "@astryxdesign/core/TextInput";
-import { Github, GitPullRequest, CircleDot, Plus, Unlink } from "lucide-react";
+import {
+  Github,
+  GitPullRequest,
+  CircleDot,
+  Plus,
+  Unlink,
+  ArrowUpRight,
+} from "lucide-react";
 import {
   updateDocumentGitHubLinksSchema,
   type DocumentGitHubLinks,
@@ -14,13 +21,7 @@ import {
 import { githubLink, type GitHubLink } from "@/github-links";
 import { api, ApiError, errorMessage } from "@/client/api";
 
-function GitHubReference({
-  reference,
-  compact = false,
-}: {
-  reference: GitHubLink;
-  compact?: boolean;
-}) {
+function GitHubReference({ reference }: { reference: GitHubLink }) {
   const Icon = reference.kind === "pull_request" ? GitPullRequest : CircleDot;
   const label = `${reference.kind === "pull_request" ? "PR" : "Issue"} #${reference.number}`;
   return (
@@ -31,17 +32,13 @@ function GitHubReference({
       label={`${reference.repository}, ${label} (öppnas i ny flik)`}
       newTabLabel="(öppnas i ny flik)"
     >
-      <Icon size={16} aria-hidden />
-      {compact ? (
-        <span>
-          {reference.repository.split("/")[1]} #{reference.number}
-        </span>
-      ) : (
+      <span className="github-reference-row">
+        <Icon size={16} aria-hidden />
         <span className="github-reference-copy">
           <strong>{label}</strong>
           <span className="muted">{reference.repository}</span>
         </span>
-      )}
+      </span>
     </Link>
   );
 }
@@ -54,10 +51,34 @@ export function GitHubReferences({ links }: { links: string[] }) {
       className="github-references"
       aria-label={`${links.length} GitHub-kopplingar`}
     >
-      <Github size={16} aria-hidden />
-      {links.slice(0, 2).map((url) => (
-        <GitHubReference key={url} reference={githubLink(url)} compact />
-      ))}
+      {links.slice(0, 2).map((url) => {
+        const reference = githubLink(url);
+        const kind = reference.kind === "pull_request" ? "PR" : "Issue";
+        const repositoryName = reference.repository.split("/")[1];
+        const accessibleLabel = `${reference.repository}, ${kind} #${reference.number} (öppnas i ny flik)`;
+        return (
+          <Button
+            key={url}
+            label={accessibleLabel}
+            href={reference.url}
+            as="a"
+            target="_blank"
+            rel="noopener noreferrer"
+            variant="secondary"
+            size="sm"
+            icon={<Github size={14} aria-hidden />}
+            tooltip={accessibleLabel}
+            endContent={<ArrowUpRight size={12} aria-hidden />}
+          >
+            <span className="github-reference-label">
+              <span className="github-reference-repo">{repositoryName}</span>
+              <span className="github-reference-number">
+                · {kind} #{reference.number}
+              </span>
+            </span>
+          </Button>
+        );
+      })}
       {links.length > 2 && (
         <span className="fine-print">+{links.length - 2} till</span>
       )}
