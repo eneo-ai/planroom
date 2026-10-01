@@ -1317,6 +1317,9 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
           "ab294e09-38d6-4356-864a-8e169cf6a202",
         ],
       );
+      // Legacy fixtures represent committed rows. Flush their deferred FK checks
+      // before DDL in this rollback-only transaction, as on a real upgrade.
+      await client.query("SET CONSTRAINTS ALL IMMEDIATE");
       await client.query(
         await readFile(
           resolve(process.cwd(), "migrations/005_document_metadata.sql"),
