@@ -147,3 +147,11 @@ Acceptance: existing version-1 scenes need no conversion or migration; every sav
 Validation: guarded TypeScript, native SDK conversion in a small happy-dom unit-test environment using the SDK's text-metrics provider, existing canvas/MCP/OpenAPI/source-isolation tests, dependency audit, formatting and remote CI's disposable database/production image checks. DOM font/canvas shims cover only conversion setup and do not claim browser appearance or PNG rendering verification. No local server, full suite, production build or browser/E2E run.
 
 Risk/recovery: the skeleton API is beta; pin 0.18.1 and rerun native conversion tests on upgrades. Scoped dependency overrides have an owner and deletion triggers in DEPLOYMENT.md. The scoped overlay selector is another explicit upgrade check. Revert the application commit to restore the previous renderer with its license configuration; saved diagrams and database history are unchanged.
+
+## Canvas initialization repair
+
+Problem: the saved diagram exists, but the viewer shows a white canvas. Excalidraw exposes its imperative API before its asynchronous scene initialization; the early update was then replaced by an empty initial scene. The production viewer confirmed zero SDK elements despite 37 saved objects.
+
+Current and proposed owner: CanvasSurface retains the SDK lifecycle and camera. Reuse the native initialData contract and the SDK's post-loading onChange notification. Supply the initial scene declaratively, then apply subsequent updates only after initialization. Delete the assumption that API availability means scene readiness. No new persistence or rendering owner. Saved scenes, MCP, revisions, Astryx controls and HTML isolation deliberately remain unchanged.
+
+Acceptance: the first mount and fullscreen remount retain all native shapes after SDK initialization; AI updates replace the scene while preserving the camera. A real SDK mount test protects against the white-canvas regression; its DOM/font/canvas shims establish lifecycle behavior, not pixel appearance. Validate with guarded focused tests, TypeScript and formatting, then inspect the existing deployed browser session. No local server, full build or browser/E2E runner. Risk/recovery: changes affect only viewer initialization; revert the application commit and rebuild without a database migration.

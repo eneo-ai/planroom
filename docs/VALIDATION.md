@@ -98,3 +98,9 @@ Guarded TypeScript and 73 focused tests across nine files pass. Four native SDK 
 Application font CSP restricts fonts to local/data sources. Assets and the retained SDK license are prepared for Docker. The CI startup check also fetches the packaged Nunito fonts and SDK license from the running production image, protecting local asset delivery. No local server, browser/E2E, full test suite or production build was started. Visual QA and browser image export remain to be checked after deployment.
 
 Remote CI [36863776666](https://github.com/eneo-ai/planroom/actions/runs/36863776666) passed for 9a0976e before the main push: all 173 tests in 21 files including PostgreSQL and MCP drawing, clean dependency installation, npm audit, TypeScript, production Docker image, migration/seed/standalone startup and HTTP delivery of all five Nunito font files and the retained SDK license. Disposable CI containers and data were removed. The final follow-up commit only records this result.
+
+## Saved canvas initialization (2026-10-01)
+
+The existing production browser showed 37 saved objects while the native SDK API reported zero elements after initialization. The new real-SDK mount regression test reproduces that empty scene with the original CanvasSurface, and passes with declarative initialData and post-loading updates. It also covers fullscreen-style remounting and camera preservation when AI updates the scene. DOM drawing/font shims validate lifecycle state, not pixels.
+
+Guarded TypeScript and three focused canvas test files passed: 14 tests, one worker, measured peak below 650 MiB. The control run intentionally failed the original viewer's scene assertion, then restored the corrected source. No local server, production build, full suite or browser/E2E runner was started.

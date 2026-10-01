@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CaptureUpdateAction,
   Excalidraw,
@@ -24,16 +24,25 @@ import styles from "./document-canvas.module.css";
 
 export default function CanvasSurface({ canvas }: { canvas: Canvas }) {
   const [editor, setEditor] = useState<ExcalidrawImperativeAPI | null>(null);
+  const [initialized, setInitialized] = useState(false);
   const [error, setError] = useState("");
   const [exporting, setExporting] = useState(false);
   const rendered = useRef(false);
+  const elements = useMemo(
+    () =>
+      convertToExcalidrawElements(canvasShapes(canvas), {
+        regenerateIds: false,
+      }),
+    [canvas],
+  );
+  // The SDK initializes asynchronously after exposing its API. Supplying the
+  // scene here prevents initialization from replacing an early update with []:
+  // API availability alone does not mean the editor has loaded its scene.
+  const [initialData] = useState(() => ({ elements, scrollToContent: true }));
 
   useEffect(() => {
-    if (!editor) return;
+    if (!editor || !initialized) return;
     try {
-      const elements = convertToExcalidrawElements(canvasShapes(canvas), {
-        regenerateIds: false,
-      });
       editor.updateScene({
         elements,
         captureUpdate: CaptureUpdateAction.NEVER,
@@ -50,7 +59,7 @@ export default function CanvasSurface({ canvas }: { canvas: Canvas }) {
     } catch (cause) {
       setError(errorMessage(cause));
     }
-  }, [editor, canvas]);
+  }, [editor, initialized, elements]);
 
   function zoom(factor: number) {
     if (!editor) return;
@@ -171,6 +180,10 @@ export default function CanvasSurface({ canvas }: { canvas: Canvas }) {
       >
         <Excalidraw
           excalidrawAPI={setEditor}
+          initialData={initialData}
+          onChange={(_elements, state) => {
+            if (!state.isLoading) setInitialized(true);
+          }}
           viewModeEnabled
           zenModeEnabled
           theme="light"
