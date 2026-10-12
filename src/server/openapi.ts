@@ -1106,7 +1106,7 @@ export const openApiDocument: OpenApiDocument = {
         operationId: "listUsers",
         summary: "List workspace users",
         description:
-          "Requires an admin browser session with completed setup. Bearer API keys cannot administer users. Returns users ordered by account creation.",
+          "Requires a globaladmin browser session with completed setup. Bearer API keys cannot administer users. Returns users ordered by account creation.",
         tags: ["Administration"],
         security: security.session,
         responses: {
@@ -1118,7 +1118,7 @@ export const openApiDocument: OpenApiDocument = {
         operationId: "createUser",
         summary: "Create a workspace account",
         description:
-          "Requires an active admin browser session with completed setup and same-origin Origin. New users must replace their temporary password on first sign-in. Email addresses are normalized to lowercase and must be unique.",
+          "Requires an active globaladmin browser session with completed setup and same-origin Origin. New users must replace their temporary password on first sign-in. Email addresses are normalized to lowercase and must be unique.",
         tags: ["Administration"],
         security: security.session,
         parameters: [origin],

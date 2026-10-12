@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { scrypt } from "node:crypto";
@@ -194,6 +194,11 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
         )
       )?.user.mustChangePassword,
     ).toBe(false);
+  });
+  beforeEach(async () => {
+    // Each behavior gets its own admission window; rate-limit tests exercise
+    // their complete budgets within one test, without earlier logins interfering.
+    await db.query("DELETE FROM login_attempts");
   });
   afterAll(async () => {
     await db.end();
@@ -923,6 +928,58 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
         headers: { cookie: `planroom_session=${loginResult.secret}` },
       }),
     );
+  });
+  it("rechecks sharing ownership after waiting for team revocation and rejects ended sessions", async () => {
+    const owner = await readyMember(principal, "owner");
+    const project = await createProject(owner, {
+      teamId: initialTeamId,
+      name: "Sharing demotion",
+      description: "",
+    });
+    const blocker = await db.connect();
+    let outcome: Promise<PromiseSettledResult<unknown>[]> | undefined;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT id FROM teams WHERE id=$1 FOR UPDATE", [
+        initialTeamId,
+      ]);
+      const pending = updateProjectSharing(owner, project.id, {
+        action: "enable",
+        expectedVersion: 1,
+      });
+      outcome = Promise.allSettled([pending]);
+      await waitForBlockedQuery("SELECT id FROM teams WHERE id=$1 FOR SHARE");
+      await blocker.query(
+        "UPDATE team_memberships SET role='editor' WHERE team_id=$1 AND user_id=$2",
+        [initialTeamId, owner.user.id],
+      );
+      await blocker.query("COMMIT");
+      await expect(pending).rejects.toMatchObject({ status: 403 });
+    } finally {
+      await blocker.query("ROLLBACK");
+      blocker.release();
+      if (outcome) await outcome;
+    }
+    expect(await getProjectSharing(principal, project.id)).toEqual({
+      path: null,
+      version: 1,
+    });
+    const account = await login(
+      owner.user.email,
+      "Changed member password 456",
+    );
+    const cached = await sessionPrincipal(account.secret);
+    await logout(
+      new Request("http://localhost/api/auth/logout", {
+        headers: { cookie: `planroom_session=${account.secret}` },
+      }),
+    );
+    await expect(
+      updateProjectSharing(cached, project.id, {
+        action: "enable",
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({ status: 401 });
   });
   it("serializes competing share decisions without overwriting the winning link", async () => {
     const project = await createProject(principal, {
