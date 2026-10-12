@@ -1,6 +1,6 @@
 # Security policy
 
-Planroom is early-stage software intended for a trusted team in one shared workspace. It has not undergone an independent penetration test. The current development line receives fixes; there are no supported long-term release branches or promised response deadlines.
+Planroom is early-stage software with team-scoped projects and optional public project read links. It has not undergone an independent penetration test. The current development line receives fixes; there are no supported long-term release branches or promised response deadlines.
 
 ## Report a vulnerability
 
@@ -10,8 +10,9 @@ Include the affected commit/version, environment, impact and a minimal synthetic
 
 ## Trust model
 
-- All configured users can read all workspace documents. This is not a multi-tenant or per-document access-control boundary.
-- Editors and administrators can save documents and comments. Viewers have read access. Personal bearer keys remain limited by the owner's role and chosen scope.
+- Ordinary users can read only their teams. Projects/tasks inherit team access; globaladmin and database operators retain explicit oversight. There is no separate per-task ACL.
+- Team owners/editors can save tasks and comments; team viewers read. Personal keys are limited by the bound team, current membership and chosen scope.
+- Team owners/globaladmin can enable public project links. These retrievable bearer URLs expose current/future task files and diagrams to anyone holding the link, regardless of lifecycle status. They never grant write or internal discussion/history/instruction access. Rotation/revocation applies to subsequent reads, not previously obtained copies. Protect token-bearing paths in logs and backups.
 - The first administrator uses a locally generated password and must complete account setup. No shared default password is included.
 - Account updates rotate sessions and revoke that user's keys. Key secrets are shown only at issuance; database storage contains their hashes.
 - New personal keys expire after 90 days. Live credentials and current role/scope are rechecked within document-write transactions, ordered with revocation and account changes.
@@ -33,6 +34,6 @@ The default app port is bound to loopback and PostgreSQL is internal. Use HTTPS 
 
 Docker builds use an allowlisted context so local configuration, backups, test output and repository history are not sent into the image. Base images and Actions are pinned, npm uses a lockfile, and weekly dependency updates are proposed for review. These controls do not guarantee that dependencies contain no vulnerabilities. CI audits all npm dependencies at every advisory severity; maintainers must also review base-image and application security changes.
 
-See [the deployment guide](docs/DEPLOYMENT.md) for bounded startup, credential rotation, backups and rollback. Public discovery, OpenAPI documentation and health expose metadata only; document APIs require authentication.
+See [the deployment guide](docs/DEPLOYMENT.md) for bounded startup, credential rotation, backups and rollback. Public discovery, OpenAPI documentation and health expose service metadata only. Ordinary document APIs require authentication; explicit share-link endpoints return a restricted project-bound projection.
 
 The source repository currently remains private during evaluation. MIT governs the code for authorized recipients; repository visibility changes require a separate maintainer decision. See [the recorded security review](docs/SECURITY_REVIEW.md) for findings, fixes and validation scope.

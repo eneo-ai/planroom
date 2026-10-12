@@ -20,6 +20,8 @@ import {
   type Principal,
 } from "../src/server/auth";
 import {
+  getSharedDocument,
+  listSharedDocuments,
   getDocumentCanvas,
   updateDocumentCanvas,
   createDocument,
@@ -66,6 +68,9 @@ import {
   updateTeam,
 } from "../src/server/teams";
 import {
+  getSharedProject,
+  getProjectSharing,
+  updateProjectSharing,
   createProject,
   getProject,
   listProjects,
@@ -564,6 +569,19 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     } while (cursor);
     expect(ids).toHaveLength(205);
     expect(new Set(ids).size).toBe(205);
+    const shared = await updateProjectSharing(principal, project.id, {
+      action: "enable",
+      expectedVersion: 1,
+    });
+    const token = shared.path!.split("/").at(-1)!;
+    const publicIds: string[] = [];
+    cursor = undefined;
+    do {
+      const page = await listSharedDocuments(token, cursor);
+      publicIds.push(...page.map((task) => task.id));
+      cursor = nextDocumentCursor(page) ?? undefined;
+    } while (cursor);
+    expect(publicIds).toEqual(ids);
   });
   it("migrates existing accounts, keys and placement without changing revisioned content or comments", async () => {
     const previousMigrations = await Promise.all(
@@ -659,6 +677,284 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
       await client.query(`SET LOCAL search_path TO public`);
       await client.query(`DROP SCHEMA ${schema} CASCADE`);
     });
+  });
+  it("shares only current project content, includes future tasks and keeps internal context private", async () => {
+    const project = await createProject(principal, {
+      teamId: initialTeamId,
+      name: "External review",
+      description: "Project description",
+    });
+    expect(await getProjectSharing(principal, project.id)).toEqual({
+      path: null,
+      version: 1,
+    });
+    const first = await createDocument(principal, {
+      ...content,
+      projectId: project.id,
+      instructions: "Internal AI guidance",
+      changeSummary: "Private author notes",
+    });
+    await addComment(principal, first.id, { body: "Private discussion" });
+    const state = await updateProjectSharing(principal, project.id, {
+      action: "enable",
+      expectedVersion: 1,
+    });
+    const token = state.path!.split("/").at(-1)!;
+    expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(JSON.stringify(await listProjects(principal))).not.toContain(token);
+    expect(
+      JSON.stringify(await getProject(principal, project.id)),
+    ).not.toContain(token);
+    expect(await getProjectSharing(principal, project.id)).toEqual(state);
+    expect(await getSharedProject(token)).toEqual({
+      name: project.name,
+      description: project.description,
+    });
+    const shared = await getSharedDocument(token, first.id);
+    expect(Object.keys(shared).sort()).toEqual(
+      [
+        "id",
+        "title",
+        "description",
+        "status",
+        "files",
+        "canvas",
+        "updatedAt",
+      ].sort(),
+    );
+    expect(shared.files).toEqual(first.files);
+    expect(JSON.stringify(shared)).not.toContain("Internal AI guidance");
+    const summary = (await listSharedDocuments(token))[0];
+    expect(summary.id).toBe(first.id);
+    expect(summary.files[0]).not.toHaveProperty("content");
+    expect(summary).not.toHaveProperty("authorName");
+    const drawn = await updateDocumentCanvas(principal, first.id, {
+      expectedVersion: first.version,
+      changeSummary: "Add diagram",
+      operations: [{ action: "rename", title: "Public diagram" }],
+    });
+    expect((await getSharedDocument(token, first.id)).canvas).toEqual(
+      drawn.canvas,
+    );
+    const second = await createDocument(principal, {
+      ...content,
+      projectId: project.id,
+      title: "Future task",
+      status: "archived",
+    });
+    expect((await listSharedDocuments(token)).map((item) => item.id)).toContain(
+      second.id,
+    );
+    expect((await getProject(principal, project.id)).version).toBe(1);
+    const { GET } =
+      await import("../src/app/api/shared/[token]/documents/[id]/route");
+    const response = await GET(
+      new Request("http://localhost/api/shared/test"),
+      { params: Promise.resolve({ token, id: first.id }) },
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual(
+      await getSharedDocument(token, first.id),
+    );
+    await expect(
+      requirePrincipal(
+        new Request("http://localhost/api/documents", {
+          headers: { authorization: `Bearer ${token}` },
+        }),
+      ),
+    ).rejects.toMatchObject({ status: 401 });
+  });
+  it("keeps public links project-bound and invalidates old links on rotation, disable and re-enable", async () => {
+    const a = await createProject(principal, {
+      teamId: initialTeamId,
+      name: "Share A",
+      description: "",
+    });
+    const b = await createProject(principal, {
+      teamId: initialTeamId,
+      name: "Share B",
+      description: "",
+    });
+    const task = await createDocument(principal, {
+      ...content,
+      projectId: b.id,
+    });
+    const enabled = await updateProjectSharing(principal, a.id, {
+      action: "enable",
+      expectedVersion: 1,
+    });
+    const token = enabled.path!.split("/").at(-1)!;
+    expect(await listSharedDocuments(token)).toEqual([]);
+    await expect(getSharedDocument(token, task.id)).rejects.toMatchObject({
+      status: 404,
+    });
+    await expect(getSharedProject("a".repeat(43))).rejects.toMatchObject({
+      status: 404,
+    });
+    expect(
+      await updateProjectSharing(principal, a.id, {
+        action: "enable",
+        expectedVersion: enabled.version,
+      }),
+    ).toEqual(enabled);
+    const rotated = await updateProjectSharing(principal, a.id, {
+      action: "rotate",
+      expectedVersion: enabled.version,
+    });
+    const nextToken = rotated.path!.split("/").at(-1)!;
+    expect(nextToken).not.toBe(token);
+    for (const read of [
+      () => getSharedProject(token),
+      () => listSharedDocuments(token),
+      () => getSharedDocument(token, task.id),
+    ])
+      await expect(read()).rejects.toMatchObject({
+        status: 404,
+        code: "NOT_FOUND",
+      });
+    const disabled = await updateProjectSharing(principal, a.id, {
+      action: "disable",
+      expectedVersion: rotated.version,
+    });
+    expect(disabled.path).toBeNull();
+    await expect(listSharedDocuments(nextToken)).rejects.toMatchObject({
+      status: 404,
+    });
+    const restored = await updateProjectSharing(principal, a.id, {
+      action: "enable",
+      expectedVersion: disabled.version,
+    });
+    expect(restored.path).not.toBe(enabled.path);
+    expect(restored.path).not.toBe(rotated.path);
+    await expect(
+      listSharedDocuments(restored.path!.split("/").at(-1)!, "x".repeat(201)),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+  it("restricts sharing administration to current owners in browser sessions", async () => {
+    const owner = await readyMember(principal, "owner");
+    const editor = await readyMember(principal, "editor");
+    const viewer = await readyMember(principal, "viewer");
+    const project = await createProject(principal, {
+      teamId: initialTeamId,
+      name: "Owner controlled",
+      description: "",
+    });
+    for (const identity of [editor, viewer]) {
+      await expect(
+        getProjectSharing(identity, project.id),
+      ).rejects.toMatchObject({ status: 403 });
+      await expect(
+        updateProjectSharing(identity, project.id, {
+          action: "enable",
+          expectedVersion: 1,
+        }),
+      ).rejects.toMatchObject({ status: 403 });
+    }
+    const key = await createToken(owner, {
+      teamId: initialTeamId,
+      name: "Owner API key",
+      scope: "write",
+    });
+    const tokenPrincipal = await requirePrincipal(
+      new Request("http://localhost/api", {
+        headers: { authorization: `Bearer ${key.token}` },
+      }),
+    );
+    await expect(
+      updateProjectSharing(tokenPrincipal, project.id, {
+        action: "enable",
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({ code: "SESSION_REQUIRED" });
+    const otherTeam = await createTeam(principal, {
+      name: "Other team",
+      description: "",
+    });
+    const otherProject = await createProject(principal, {
+      teamId: otherTeam.id,
+      name: "Other project",
+      description: "",
+    });
+    await expect(
+      getProjectSharing(owner, otherProject.id),
+    ).rejects.toMatchObject({ status: 404 });
+    const state = await updateProjectSharing(owner, project.id, {
+      action: "enable",
+      expectedVersion: 1,
+    });
+    await setMember(principal, initialTeamId, {
+      email: owner.user.email,
+      role: "editor",
+    });
+    await expect(
+      updateProjectSharing(owner, project.id, {
+        action: "disable",
+        expectedVersion: state.version,
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+    const { PUT } = await import("../src/app/api/projects/[id]/sharing/route");
+    const loginResult = await login(
+      "real-admin@example.test",
+      "Changed long password 456",
+    );
+    const response = await PUT(
+      new Request(`http://localhost/api/projects/${project.id}/sharing`, {
+        method: "PUT",
+        headers: {
+          cookie: `planroom_session=${loginResult.secret}`,
+          origin: "https://external.example",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "disable",
+          expectedVersion: state.version,
+        }),
+      }),
+      { params: Promise.resolve({ id: project.id }) },
+    );
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: { code: "INVALID_ORIGIN" },
+    });
+    expect(await getProjectSharing(principal, project.id)).toEqual(state);
+    await logout(
+      new Request("http://localhost/api/auth/logout", {
+        headers: { cookie: `planroom_session=${loginResult.secret}` },
+      }),
+    );
+  });
+  it("serializes competing share decisions without overwriting the winning link", async () => {
+    const project = await createProject(principal, {
+      teamId: initialTeamId,
+      name: "Sharing race",
+      description: "",
+    });
+    const results = await Promise.allSettled([
+      updateProjectSharing(principal, project.id, {
+        action: "enable",
+        expectedVersion: 1,
+      }),
+      updateProjectSharing(principal, project.id, {
+        action: "enable",
+        expectedVersion: 1,
+      }),
+    ]);
+    expect(results.filter((item) => item.status === "fulfilled")).toHaveLength(
+      1,
+    );
+    const rejected = results.find((item) => item.status === "rejected");
+    if (!rejected || rejected.status !== "rejected")
+      throw new Error("Expected conflict");
+    expect(rejected.reason).toMatchObject({ code: "SHARING_CONFLICT" });
+    const current = await getProjectSharing(principal, project.id);
+    await expect(
+      updateProjectSharing(principal, project.id, {
+        action: "disable",
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({ code: "SHARING_CONFLICT" });
+    expect(await getProjectSharing(principal, project.id)).toEqual(current);
   });
   it("seeds exactly once after the start account has been renamed, even without its password", async () => {
     delete process.env.SEED_ADMIN_PASSWORD;

@@ -21,6 +21,8 @@ Developed for shared planning at **Sundsvalls kommun**, Sweden. The repository i
 
 **Early-stage software:** suitable for evaluation by a trusted team. This is a single-workspace application with a Swedish interface, not a finished public document-hosting platform. Review the [limitations](#limits-and-security-boundaries) and [deployment guide](docs/DEPLOYMENT.md) before using it with sensitive information.
 
+Projects can be shared with external reviewers through **Projekt → Publik delning**. A team owner activates a link; anyone holding it can read the project's current and future tasks, files and diagrams without an account. Internal instructions, discussion, history, people and GitHub references stay private. Owners can replace or disable the link at any time. All projects start private. See the [sharing contract](docs/CONTRACT.md#teams-projects-and-public-sharing) for scope and recovery details.
+
 ## ✨ What it does
 
 - Combines HTML and Markdown files on one planning card, preserving original sources, CSS and inline SVG.

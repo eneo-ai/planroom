@@ -11,6 +11,8 @@ import type {
   Comment,
   DocumentContent,
   DocumentCreate,
+  SharedDocument,
+  SharedDocumentSummary,
   TeamRole,
   DocumentDetail,
   DocumentGitHubLinksUpdate,
@@ -40,7 +42,7 @@ import {
   teamAccessPredicate,
   type Principal,
 } from "./auth";
-import { lockProjectAccess } from "./projects";
+import { lockProjectAccess, assertPublicShareToken } from "./projects";
 import { db, transaction } from "./db";
 import { AppError, notFound } from "./errors";
 
@@ -676,4 +678,64 @@ export async function updateDocumentCanvas(
     },
   );
   return canvasDetail(updated);
+}
+
+// These projections read the same current metadata and immutable file/canvas
+// revision as authenticated reads, but cannot be used as a write principal.
+export async function listSharedDocuments(
+  token: string,
+  cursor?: string,
+): Promise<SharedDocumentSummary[]> {
+  assertPublicShareToken(token);
+  const position = parseDocumentCursor(cursor);
+  // A lateral left join distinguishes an empty project from a revoked link in
+  // one snapshot. The query never reads file bodies for the list.
+  const rows = (
+    await db.query<{ document: SharedDocumentSummary | null }>(
+      `SELECT item.document FROM projects p LEFT JOIN LATERAL (
+      SELECT d.updated_at,d.id,jsonb_build_object('id',d.id,'title',d.title,'description',d.description,
+        'status',d.status,'updatedAt',to_char(d.updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+        'files',(SELECT jsonb_agg(file - 'content' ORDER BY ordinal) FROM jsonb_array_elements(r.files) WITH ORDINALITY AS entries(file,ordinal))) AS document
+      FROM documents d JOIN document_revisions r ON r.document_id=d.id AND r.number=d.current_revision
+      WHERE d.project_id=p.id AND ($2::timestamptz IS NULL OR (d.updated_at,d.id)<($2::timestamptz,$3::uuid))
+      ORDER BY d.updated_at DESC,d.id DESC LIMIT 100
+    ) item ON true WHERE p.public_share_token=$1 ORDER BY item.updated_at DESC,item.id DESC`,
+      [token, position?.updatedAt ?? null, position?.id ?? null],
+    )
+  ).rows;
+  if (!rows.length) notFound();
+  return rows.flatMap((row) => (row.document ? [row.document] : []));
+}
+export async function getSharedDocument(
+  token: string,
+  id: string,
+): Promise<SharedDocument> {
+  assertPublicShareToken(token);
+  const row = (
+    await db.query<{
+      id: string;
+      title: string;
+      description: string;
+      status: DocumentStatus;
+      files: PlanningFile[];
+      canvas: Canvas | null;
+      updated_at: Date;
+    }>(
+      `SELECT d.id,d.title,d.description,d.status,r.files,r.canvas,d.updated_at
+     FROM documents d JOIN projects p ON p.id=d.project_id
+     JOIN document_revisions r ON r.document_id=d.id AND r.number=d.current_revision
+     WHERE p.public_share_token=$1 AND d.id=$2`,
+      [token, id],
+    )
+  ).rows[0];
+  if (!row) notFound();
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    status: row.status,
+    files: row.files,
+    canvas: row.canvas,
+    updatedAt: row.updated_at.toISOString(),
+  };
 }

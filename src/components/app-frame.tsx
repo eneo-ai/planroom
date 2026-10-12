@@ -35,7 +35,8 @@ export function AppFrame({ children }: { children: ReactNode }) {
   if (
     pathname === "/login" ||
     pathname === "/setup" ||
-    pathname === "/api/docs"
+    pathname === "/api/docs" ||
+    pathname.startsWith("/shared/")
   )
     return children;
   async function logout() {

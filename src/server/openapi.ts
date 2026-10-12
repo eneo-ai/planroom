@@ -2,6 +2,12 @@ import { z } from "zod";
 import {
   updateCanvasSchema,
   documentCanvasSchema,
+  projectSharingSchema,
+  updateProjectSharingSchema,
+  publicShareTokenSchema,
+  sharedProjectSchema,
+  sharedDocumentSchema,
+  sharedDocumentsResponseSchema,
   apiDiscoverySchema,
   createDocumentSchema,
   createProjectSchema,
@@ -113,6 +119,7 @@ interface OpenApiDocument {
 }
 
 const requestSchemas = {
+  ProjectSharingUpdate: updateProjectSharingSchema,
   CanvasUpdate: updateCanvasSchema,
   LoginRequest: loginSchema,
   SetupRequest: setupSchema,
@@ -132,6 +139,10 @@ const requestSchemas = {
   CreateTokenRequest: createTokenSchema,
 };
 const responseSchemas = {
+  ProjectSharing: projectSharingSchema,
+  SharedProject: sharedProjectSchema,
+  SharedDocument: sharedDocumentSchema,
+  SharedDocumentsResponse: sharedDocumentsResponseSchema,
   DocumentCanvas: documentCanvasSchema,
   User: userSchema,
   Team: teamSchema,
@@ -213,6 +224,14 @@ const cookieHeader: Record<string, Header> = {
       "HttpOnly planroom_session cookie; SameSite=Lax, Path=/, seven-day lifetime. Secure when APP_URL uses HTTPS. Never expose its value to JavaScript.",
     schema: { type: "string" },
   },
+};
+const publicShareToken: Parameter = {
+  name: "token",
+  in: "path",
+  required: true,
+  description:
+    "Public project bearer link; never use as an API key. Invalid, disabled and replaced links return NOT_FOUND.",
+  schema: z.toJSONSchema(publicShareTokenSchema),
 };
 const id: Parameter = {
   name: "id",
@@ -305,6 +324,97 @@ export const openApiDocument: OpenApiDocument = {
     },
   ],
   paths: {
+    "/api/projects/{id}/sharing": {
+      get: {
+        operationId: "getProjectSharing",
+        summary: "Read project sharing settings",
+        description:
+          "Team owner or globaladmin browser session required. Returns the current share path and independent sharing version; never included in ordinary project listings.",
+        tags: ["Projects"],
+        security: security.session,
+        parameters: [id],
+        responses: {
+          "200": jsonResponse("Current sharing settings.", "ProjectSharing"),
+          ...errors(400, 401, 403, 404, 500),
+        },
+      },
+      put: {
+        operationId: "updateProjectSharing",
+        summary: "Enable, rotate or disable public project access",
+        description:
+          "Team owner or globaladmin browser session and same-origin request required. Use the sharing version as expectedVersion. SHARING_CONFLICT requires fetching settings and reviewing again. Rotation and disable invalidate the previous link. Re-enabling generates a fresh link. All current and future tasks, regardless of status, and their current files and diagrams become readable without an account; instructions, people, history, discussion and GitHub links stay private. No public writes. Downloaded or already displayed content cannot be recalled.",
+        tags: ["Projects"],
+        security: security.session,
+        parameters: [id, origin],
+        requestBody: body("ProjectSharingUpdate"),
+        responses: {
+          "200": jsonResponse("Updated sharing settings.", "ProjectSharing"),
+          ...errors(400, 401, 403, 404, 408, 409, 413, 415, 500, 503),
+        },
+      },
+    },
+    "/api/shared/{token}": {
+      get: {
+        operationId: "getSharedProject",
+        summary: "Read a publicly shared project",
+        description:
+          "Anyone holding an active public link can read this limited project projection. No session, API key or membership is created. Responses are not cached or indexed.",
+        tags: ["Public sharing"],
+        security: [],
+        parameters: [publicShareToken],
+        responses: {
+          "200": jsonResponse(
+            "Shared project name and description.",
+            "SharedProject",
+          ),
+          ...errors(404, 500),
+        },
+      },
+    },
+    "/api/shared/{token}/documents": {
+      get: {
+        operationId: "listSharedDocuments",
+        summary: "List tasks in a shared project",
+        description:
+          "Returns up to 100 current tasks from this project, including all statuses. File metadata only. Each request rechecks the active link. Pass nextCursor unchanged to continue; a null cursor ends the list.",
+        tags: ["Public sharing"],
+        security: [],
+        parameters: [
+          publicShareToken,
+          {
+            name: "cursor",
+            in: "query",
+            description: "Opaque cursor returned by this list.",
+            schema: { type: "string", maxLength: 200 },
+          },
+        ],
+        responses: {
+          "200": jsonResponse(
+            "Current public task summaries.",
+            "SharedDocumentsResponse",
+          ),
+          ...errors(400, 404, 500),
+        },
+      },
+    },
+    "/api/shared/{token}/documents/{id}": {
+      get: {
+        operationId: "getSharedDocument",
+        summary: "Read a task in a shared project",
+        description:
+          "Returns current files and diagram only for a task belonging to the link's project. Other-project ids and revoked links both return NOT_FOUND. No instructions, history, discussion, author names, membership or GitHub references. Original HTML remains untrusted and must be displayed in an isolated sandbox.",
+        tags: ["Public sharing"],
+        security: [],
+        parameters: [publicShareToken, id],
+        responses: {
+          "200": jsonResponse(
+            "Current public task and original files.",
+            "SharedDocument",
+          ),
+          ...errors(400, 404, 500),
+        },
+      },
+    },
     "/api/documents/{id}/canvas": {
       get: {
         operationId: "readCanvas",
