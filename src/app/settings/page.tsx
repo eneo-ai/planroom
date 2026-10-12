@@ -90,7 +90,7 @@ export default function SettingsPage() {
           id="settings-users"
           aria-labelledby="settings-users-tab"
         >
-          {loaded.includes("users") && <AdminUsers />}
+          {loaded.includes("users") && <AdminUsers currentUserId={user.id} />}
         </section>
       )}
     </div>

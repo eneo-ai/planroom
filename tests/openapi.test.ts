@@ -21,6 +21,27 @@ function operation(path: string, method: "get" | "post" | "put" | "delete") {
 }
 
 describe("published REST API contracts", () => {
+  it("documents one-time resets as a session-only action with no request body", () => {
+    const reset = operation("/api/admin/users/{id}/reset-password", "post");
+    expect(reset.security).toEqual([{ sessionCookie: [] }]);
+    expect(reset.requestBody).toBeUndefined();
+    expect(reset.parameters?.map((parameter) => parameter.name)).toEqual([
+      "id",
+      "Origin",
+    ]);
+    expect(reset.responses["200"].content?.["application/json"].schema).toEqual(
+      { $ref: "#/components/schemas/PasswordResetResponse" },
+    );
+    expect(reset.responses["403"]).toBeDefined();
+    expect(reset.responses["404"]).toBeDefined();
+    expect(
+      openApiDocument.components.schemas.PasswordResetResponse.required,
+    ).toEqual(["user", "temporaryPassword", "expiresAt"]);
+    expect(
+      openApiDocument.components.schemas.PasswordResetResponse.properties
+        ?.temporaryPassword,
+    ).toMatchObject({ pattern: "^[A-Za-z0-9_-]{24}$" });
+  });
   it("documents every implemented REST route and excludes the separate MCP protocol", async () => {
     const directory = fileURLToPath(
       new URL("../src/app/api/", import.meta.url),

@@ -2,6 +2,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { scrypt } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { verifyPassword } from "../src/server/passwords";
 import { db, transaction } from "../src/server/db";
 import { migrate } from "../src/server/migrate";
@@ -14,6 +16,8 @@ import {
   findPrincipal,
   login,
   replaceAccount,
+  resetUserPassword,
+  resetUserPasswordAsOperator,
   requirePrincipal,
   logout,
   secretHash,
@@ -39,6 +43,7 @@ import {
 } from "../src/server/documents";
 import { AppError } from "../src/server/errors";
 import {
+  passwordResetResponseSchema,
   documentContentSchema,
   planningFilesSchema,
   createDocumentSchema,
@@ -76,6 +81,7 @@ import {
   listProjects,
   updateProject,
 } from "../src/server/projects";
+import { POST as resetPasswordPost } from "../src/app/api/admin/users/[id]/reset-password/route";
 const enabled = Boolean(process.env.TEST_DATABASE_URL);
 const content = createDocumentSchema.parse({
   projectId: initialProjectId,
@@ -202,6 +208,386 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
   });
   afterAll(async () => {
     await db.end();
+  });
+  it("resets through HTTP, revokes credentials and consumes the password once before account setup", async () => {
+    const member = await readyMember(principal, "editor");
+    const plan = await createDocument(member, content);
+    const previous = await login(
+      member.user.email,
+      "Changed member password 456",
+    );
+    const key = await createToken(member, {
+      teamId: initialTeamId,
+      name: "Before reset",
+      scope: "write",
+    });
+    const keyRequest = new Request("http://localhost/api", {
+      headers: { authorization: `Bearer ${key.token}` },
+    });
+    const staleToken = await findPrincipal(keyRequest);
+    if (!staleToken) throw new Error("Missing token principal");
+    const administrator = await login(
+      principal.user.email,
+      "Changed long password 456",
+    );
+    const origin = process.env.APP_URL ?? "http://localhost:3000";
+    const response = await resetPasswordPost(
+      new Request(
+        `${origin}/api/admin/users/${member.user.id}/reset-password`,
+        {
+          method: "POST",
+          headers: {
+            origin,
+            cookie: `planroom_session=${administrator.secret}`,
+          },
+        },
+      ),
+      { params: Promise.resolve({ id: member.user.id }) },
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const reset = passwordResetResponseSchema.parse(await response.json());
+    expect(reset.user).toEqual({ ...member.user, mustChangePassword: true });
+    const remaining = Date.parse(reset.expiresAt) - Date.now();
+    expect(remaining).toBeGreaterThan(23.9 * 60 * 60 * 1000);
+    expect(remaining).toBeLessThanOrEqual(24 * 60 * 60 * 1000);
+    const stored = (
+      await db.query<{
+        password_hash: string;
+        password_reset_used_at: Date | null;
+      }>("SELECT password_hash,password_reset_used_at FROM users WHERE id=$1", [
+        member.user.id,
+      ])
+    ).rows[0];
+    expect(stored.password_hash).not.toContain(reset.temporaryPassword);
+    expect(
+      await verifyPassword(reset.temporaryPassword, stored.password_hash),
+    ).toBe(true);
+    expect(stored.password_reset_used_at).toBeNull();
+    expect(await findPrincipal(keyRequest)).toBeNull();
+    expect(
+      await findPrincipal(
+        new Request(`${origin}/api`, {
+          headers: { cookie: `planroom_session=${previous.secret}` },
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      (
+        await db.query("SELECT secret_hash FROM sessions WHERE user_id=$1", [
+          member.user.id,
+        ])
+      ).rows,
+    ).toHaveLength(0);
+    expect(
+      (
+        await db.query("SELECT id FROM api_tokens WHERE user_id=$1", [
+          member.user.id,
+        ])
+      ).rows,
+    ).toHaveLength(0);
+    for (const stale of [member, staleToken])
+      await expect(createDocument(stale, content)).rejects.toMatchObject({
+        code: "UNAUTHENTICATED",
+      });
+    await expect(
+      createToken(member, {
+        teamId: initialTeamId,
+        name: "Stale reset session",
+        scope: "read",
+      }),
+    ).rejects.toMatchObject({ code: "UNAUTHENTICATED" });
+    await expect(
+      login(member.user.email, "Changed member password 456"),
+    ).rejects.toMatchObject({ code: "INVALID_CREDENTIALS" });
+    const attempts = await Promise.allSettled([
+      login(member.user.email, reset.temporaryPassword),
+      login(member.user.email, reset.temporaryPassword),
+    ]);
+    expect(
+      attempts.filter((attempt) => attempt.status === "fulfilled"),
+    ).toHaveLength(1);
+    const rejected = attempts.find((attempt) => attempt.status === "rejected");
+    expect(rejected).toMatchObject({
+      status: "rejected",
+      reason: { code: "INVALID_CREDENTIALS" },
+    });
+    const accepted = attempts.find((attempt) => attempt.status === "fulfilled");
+    if (!accepted || accepted.status !== "fulfilled")
+      throw new Error("Expected one reset session");
+    const setup = await sessionPrincipal(accepted.value.secret);
+    await expect(createDocument(setup, content)).rejects.toMatchObject({
+      code: "ACCOUNT_SETUP_REQUIRED",
+    });
+    const replacement = await replaceAccount(setup, {
+      name: member.user.name,
+      email: member.user.email,
+      currentPassword: reset.temporaryPassword,
+      password: "Chosen after reset password 789",
+    });
+    expect(replacement.user).toEqual(member.user);
+    const ready = await sessionPrincipal(replacement.secret);
+    expect((await getDocument(ready, plan.id)).files).toEqual(plan.files);
+    expect(
+      (
+        await db.query(
+          "SELECT password_reset_expires_at,password_reset_used_at FROM users WHERE id=$1",
+          [member.user.id],
+        )
+      ).rows,
+    ).toEqual([
+      { password_reset_expires_at: null, password_reset_used_at: null },
+    ]);
+    await expect(
+      login(member.user.email, reset.temporaryPassword),
+    ).rejects.toMatchObject({ code: "INVALID_CREDENTIALS" });
+    expect(
+      (await login(member.user.email, "Chosen after reset password 789")).user
+        .mustChangePassword,
+    ).toBe(false);
+  }, 20_000);
+
+  it("expires unconsumed passwords and lets an operator replace lost passwords and setup sessions", async () => {
+    const member = await readyMember(principal, "viewer");
+    const expired = await resetUserPassword(principal, member.user.id);
+    await db.query(
+      "UPDATE users SET password_reset_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",
+      [member.user.id],
+    );
+    await expect(
+      login(member.user.email, expired.temporaryPassword),
+    ).rejects.toMatchObject({ code: "INVALID_CREDENTIALS" });
+    const renewed = await resetUserPasswordAsOperator(
+      member.user.email.toUpperCase(),
+    );
+    expect(renewed.temporaryPassword).not.toBe(expired.temporaryPassword);
+    await expect(
+      login(member.user.email, expired.temporaryPassword),
+    ).rejects.toMatchObject({ code: "INVALID_CREDENTIALS" });
+    const consumed = await login(member.user.email, renewed.temporaryPassword);
+    const setup = await sessionPrincipal(consumed.secret);
+    const { stdout } = await promisify(execFile)(
+      process.execPath,
+      ["--import", "tsx", "scripts/reset-password.ts", member.user.email],
+      { timeout: 10_000, maxBuffer: 8192 },
+    );
+    const latestPassword = /^Temporary password: ([A-Za-z0-9_-]{24})$/m.exec(
+      stdout,
+    )?.[1];
+    if (!latestPassword)
+      throw new Error("CLI did not return a one-time password");
+    expect(stdout).toContain(member.user.email);
+    await expect(
+      replaceAccount(setup, {
+        name: member.user.name,
+        email: member.user.email,
+        currentPassword: renewed.temporaryPassword,
+        password: "Fresh reset password 789",
+      }),
+    ).rejects.toMatchObject({ code: "UNAUTHENTICATED" });
+    expect(
+      (await login(member.user.email, latestPassword)).user.mustChangePassword,
+    ).toBe(true);
+    await expect(
+      resetUserPasswordAsOperator("absent-reset@example.test"),
+    ).rejects.toMatchObject({ status: 404 });
+  }, 15_000);
+
+  it("restricts reset to another user and an active same-origin globaladmin session", async () => {
+    const member = await readyMember(principal, "owner");
+    await expect(
+      resetUserPassword(member, principal.user.id),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      resetUserPassword(principal, principal.user.id.toUpperCase()),
+    ).rejects.toMatchObject({ code: "SELF_RESET_NOT_ALLOWED" });
+    await expect(
+      resetUserPassword(principal, crypto.randomUUID()),
+    ).rejects.toMatchObject({ status: 404 });
+    const administrator = await login(
+      principal.user.email,
+      "Changed long password 456",
+    );
+    const key = await createToken(principal, {
+      teamId: initialTeamId,
+      name: "Cannot reset via API key",
+      scope: "write",
+    });
+    const origin = process.env.APP_URL ?? "http://localhost:3000";
+    const route = `${origin}/api/admin/users/${member.user.id}/reset-password`;
+    const denied: { headers: Record<string, string>; status: number }[] = [
+      { headers: { origin }, status: 401 },
+      {
+        headers: {
+          origin: "https://outside.example.test",
+          cookie: `planroom_session=${administrator.secret}`,
+        },
+        status: 403,
+      },
+      {
+        headers: { origin, authorization: `Bearer ${key.token}` },
+        status: 403,
+      },
+    ];
+    for (const attempt of denied) {
+      const response = await resetPasswordPost(
+        new Request(route, { method: "POST", headers: attempt.headers }),
+        { params: Promise.resolve({ id: member.user.id }) },
+      );
+      expect(response.status).toBe(attempt.status);
+      expect(await response.text()).not.toContain("temporaryPassword");
+    }
+    const invalid = await resetPasswordPost(
+      new Request(route, {
+        method: "POST",
+        headers: { origin, cookie: `planroom_session=${administrator.secret}` },
+      }),
+      { params: Promise.resolve({ id: "invalid" }) },
+    );
+    expect(invalid.status).toBe(400);
+    expect(
+      (await login(member.user.email, "Changed member password 456")).user
+        .mustChangePassword,
+    ).toBe(false);
+  }, 15_000);
+
+  it.each(["demotion", "revocation"] as const)(
+    "rechecks administrator %s after waiting for reset locks",
+    async (invalidation) => {
+      let actor = await readyMember(principal, "owner");
+      await db.query("UPDATE users SET role='global_admin' WHERE id=$1", [
+        actor.user.id,
+      ]);
+      actor = { ...actor, user: { ...actor.user, role: "global_admin" } };
+      const target = await readyMember(principal, "viewer");
+      const blocker = await db.connect();
+      let outcome:
+        | Promise<
+            PromiseSettledResult<
+              Awaited<ReturnType<typeof resetUserPassword>>
+            >[]
+          >
+        | undefined;
+      try {
+        await blocker.query("BEGIN");
+        await blocker.query("SELECT id FROM users WHERE id=$1 FOR UPDATE", [
+          actor.user.id,
+        ]);
+        outcome = Promise.allSettled([
+          resetUserPassword(actor, target.user.id),
+        ]);
+        await waitForBlockedQuery(
+          "SELECT id FROM users WHERE id=ANY($1::uuid[]) ORDER BY id FOR NO KEY UPDATE",
+        );
+        if (invalidation === "demotion")
+          await blocker.query("UPDATE users SET role='user' WHERE id=$1", [
+            actor.user.id,
+          ]);
+        else
+          await blocker.query("DELETE FROM sessions WHERE user_id=$1", [
+            actor.user.id,
+          ]);
+        await blocker.query("COMMIT");
+        expect(await outcome).toMatchObject([
+          {
+            status: "rejected",
+            reason: {
+              code:
+                invalidation === "demotion" ? "FORBIDDEN" : "UNAUTHENTICATED",
+            },
+          },
+        ]);
+      } finally {
+        await blocker.query("ROLLBACK");
+        blocker.release();
+        await outcome;
+      }
+      expect(
+        (await login(target.user.email, "Changed member password 456")).user
+          .mustChangePassword,
+      ).toBe(false);
+    },
+    15_000,
+  );
+
+  it("serializes reciprocal administrator resets without deadlock and rejects the revoked actor", async () => {
+    const first = await readyMember(principal, "owner");
+    const second = await readyMember(principal, "owner");
+    await db.query(
+      "UPDATE users SET role='global_admin' WHERE id=ANY($1::uuid[])",
+      [[first.user.id, second.user.id]],
+    );
+    const a: Principal = {
+      ...first,
+      user: { ...first.user, role: "global_admin" },
+    };
+    const b: Principal = {
+      ...second,
+      user: { ...second.user, role: "global_admin" },
+    };
+    const results = await Promise.allSettled([
+      resetUserPassword(a, b.user.id),
+      resetUserPassword(b, a.user.id),
+    ]);
+    expect(
+      results.filter((result) => result.status === "fulfilled"),
+    ).toHaveLength(1);
+    expect(
+      results.find((result) => result.status === "rejected"),
+    ).toMatchObject({ reason: { code: "UNAUTHENTICATED" } });
+  }, 15_000);
+
+  it("adds reset metadata without changing existing credentials or account identity", async () => {
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("CREATE SCHEMA reset_migration_test");
+      await client.query("SET LOCAL search_path TO reset_migration_test");
+      await client.query(
+        await readFile(
+          resolve(process.cwd(), "migrations/001_initial.sql"),
+          "utf8",
+        ),
+      );
+      const id = crypto.randomUUID();
+      await client.query(
+        "INSERT INTO users(id,name,email,password_hash,role,must_change_password) VALUES($1,'Existing user','existing@example.test','existing-hash','editor',false)",
+        [id],
+      );
+      await client.query(
+        await readFile(
+          resolve(process.cwd(), "migrations/011_password_reset.sql"),
+          "utf8",
+        ),
+      );
+      expect(
+        (
+          await client.query(
+            "SELECT id,name,email,password_hash,role,must_change_password,password_reset_expires_at,password_reset_used_at FROM users",
+          )
+        ).rows,
+      ).toEqual([
+        {
+          id,
+          name: "Existing user",
+          email: "existing@example.test",
+          password_hash: "existing-hash",
+          role: "editor",
+          must_change_password: false,
+          password_reset_expires_at: null,
+          password_reset_used_at: null,
+        },
+      ]);
+      await expect(
+        client.query(
+          "UPDATE users SET password_reset_used_at=now() WHERE id=$1",
+          [id],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
   });
   it("isolates team tasks, history, comments, exports and parent discovery while retaining globaladmin oversight", async () => {
     const member = await readyMember(principal, "editor");
