@@ -31,11 +31,17 @@ import {
   updateDocumentStatus,
   updateDocumentGitHubLinks,
   listDocuments,
+  nextDocumentCursor,
   addComment,
   listComments,
 } from "../src/server/documents";
 import { AppError } from "../src/server/errors";
-import { documentContentSchema, planningFilesSchema } from "../src/contracts";
+import {
+  documentContentSchema,
+  planningFilesSchema,
+  createDocumentSchema,
+  type TeamRole,
+} from "../src/contracts";
 import { createPlanroomServer } from "../src/mcp/server";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -49,8 +55,25 @@ import {
   DELETE as mcpDelete,
 } from "../src/app/api/mcp/route";
 
+import {
+  initialTeamId,
+  initialProjectId,
+  setMember,
+  createTeam,
+  getTeam,
+  listTeams,
+  removeMember,
+  updateTeam,
+} from "../src/server/teams";
+import {
+  createProject,
+  getProject,
+  listProjects,
+  updateProject,
+} from "../src/server/projects";
 const enabled = Boolean(process.env.TEST_DATABASE_URL);
-const content = documentContentSchema.parse({
+const content = createDocumentSchema.parse({
+  projectId: initialProjectId,
   title: "Concurrent planning",
   files: [
     {
@@ -71,6 +94,36 @@ async function sessionPrincipal(secret: string): Promise<Principal> {
   );
   if (!principal) throw new Error("Expected active authenticated session");
   return principal;
+}
+async function createMember(
+  admin: Principal,
+  input: { name: string; email: string; password: string; role: TeamRole },
+) {
+  const user = await createUser(admin, { ...input, role: "user" });
+  await setMember(admin, initialTeamId, {
+    email: user.email,
+    role: input.role,
+  });
+  return user;
+}
+async function readyMember(
+  admin: Principal,
+  role: TeamRole,
+): Promise<Principal> {
+  const user = await createMember(admin, {
+    name: "Team member",
+    email: `${crypto.randomUUID()}@example.test`,
+    password: "Initial member password 123",
+    role,
+  });
+  const session = await login(user.email, "Initial member password 123");
+  const ready = await replaceAccount(await sessionPrincipal(session.secret), {
+    name: user.name,
+    email: user.email,
+    currentPassword: "Initial member password 123",
+    password: "Changed member password 456",
+  });
+  return sessionPrincipal(ready.secret);
 }
 async function waitForBlockedQuery(
   sql: string,
@@ -140,6 +193,473 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
   afterAll(async () => {
     await db.end();
   });
+  it("isolates team tasks, history, comments, exports and parent discovery while retaining globaladmin oversight", async () => {
+    const member = await readyMember(principal, "editor");
+    const teamA = await createTeam(principal, {
+      name: "Isolation A",
+      description: "",
+    });
+    const teamB = await createTeam(principal, {
+      name: "Isolation B",
+      description: "",
+    });
+    await setMember(principal, teamA.id, {
+      email: member.user.email,
+      role: "editor",
+    });
+    const projectA = await createProject(member, {
+      teamId: teamA.id,
+      name: "Visible project",
+      description: "",
+    });
+    const projectB = await createProject(principal, {
+      teamId: teamB.id,
+      name: "Private project",
+      description: "",
+    });
+    const taskA = await createDocument(member, {
+      ...content,
+      projectId: projectA.id,
+    });
+    const taskB = await createDocument(principal, {
+      ...content,
+      projectId: projectB.id,
+      title: "Private task",
+    });
+    await addComment(principal, taskB.id, { body: "Private discussion" });
+    expect((await listTeams(member)).map((team) => team.id)).toContain(
+      teamA.id,
+    );
+    expect((await listTeams(member)).map((team) => team.id)).not.toContain(
+      teamB.id,
+    );
+    expect(
+      (await listProjects(member)).map((project) => project.id),
+    ).not.toContain(projectB.id);
+    expect(await listDocuments(member, { teamId: teamB.id })).toEqual([]);
+    expect(
+      (await listDocuments(member, { projectId: projectA.id })).map(
+        (task) => task.id,
+      ),
+    ).toEqual([taskA.id]);
+    const forbidden = [
+      () => getTeam(member, teamB.id),
+      () => getProject(member, projectB.id),
+      () => getDocument(member, taskB.id),
+      () => getDocumentCanvas(member, taskB.id),
+      () => getRevision(member, taskB.id, 1),
+      () => listRevisions(member, taskB.id),
+      () => listComments(member, taskB.id),
+      () => createDocument(member, { ...content, projectId: projectB.id }),
+      () =>
+        updateDocumentStatus(member, taskB.id, {
+          status: "ready",
+          expectedVersion: 999,
+        }),
+      () => addComment(member, taskB.id, { body: "Must not leak" }),
+      () =>
+        restoreDocument(member, taskB.id, 1, {
+          expectedVersion: 999,
+          changeSummary: "Forbidden",
+        }),
+    ];
+    for (const operation of forbidden)
+      await expect(operation()).rejects.toMatchObject({
+        status: 404,
+        code: "NOT_FOUND",
+        currentRevision: undefined,
+      });
+    const { GET: exportFile } =
+      await import("../src/app/api/documents/[id]/export/route");
+    const readKey = await createToken(member, {
+      name: "Isolated reader",
+      scope: "read",
+      teamId: teamA.id,
+    });
+    const response = await exportFile(
+      new Request(`http://localhost/api/documents/${taskB.id}/export`, {
+        headers: { authorization: `Bearer ${readKey.token}` },
+      }),
+      { params: Promise.resolve({ id: taskB.id }) },
+    );
+    expect(response.status).toBe(404);
+    const tokenPrincipal = await requirePrincipal(
+      new Request("http://localhost/api/mcp", {
+        headers: { authorization: `Bearer ${readKey.token}` },
+      }),
+      { tokenOnly: true },
+    );
+    const server = createPlanroomServer(tokenPrincipal);
+    const client = new Client({
+      name: "Team isolation integration",
+      version: "1.0.0",
+    });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      const denied = await client.callTool({
+        name: "read_document",
+        arguments: { id: taskB.id },
+      });
+      expect(denied.isError).toBe(true);
+      expect(JSON.stringify(denied)).toContain("NOT_FOUND");
+      expect(JSON.stringify(denied)).not.toContain(taskB.title);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+    expect((await getDocument(principal, taskB.id)).files).toEqual(
+      content.files,
+    );
+  });
+  it("uses per-team roles and constrains a personal key even when its owner can access both teams", async () => {
+    const member = await readyMember(principal, "editor");
+    const first = await createTeam(principal, {
+      name: "Key A",
+      description: "",
+    });
+    const second = await createTeam(principal, {
+      name: "Key B",
+      description: "",
+    });
+    await setMember(principal, first.id, {
+      email: member.user.email,
+      role: "editor",
+    });
+    await setMember(principal, second.id, {
+      email: member.user.email,
+      role: "viewer",
+    });
+    const projectA = await createProject(principal, {
+      teamId: first.id,
+      name: "A",
+      description: "",
+    });
+    const projectB = await createProject(principal, {
+      teamId: second.id,
+      name: "B",
+      description: "",
+    });
+    const taskB = await createDocument(principal, {
+      ...content,
+      projectId: projectB.id,
+    });
+    await expect(
+      createDocument(member, { ...content, projectId: projectB.id }),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      createToken(member, {
+        name: "Forbidden write",
+        scope: "write",
+        teamId: second.id,
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+    const key = await createToken(member, {
+      name: "Only A",
+      scope: "write",
+      teamId: first.id,
+    });
+    const request = new Request("http://localhost/api/mcp", {
+      headers: { authorization: `Bearer ${key.token}` },
+    });
+    const cached = await requirePrincipal(request, { tokenOnly: true });
+    expect((await listTeams(cached)).map((team) => team.id)).toEqual([
+      first.id,
+    ]);
+    await createDocument(cached, { ...content, projectId: projectA.id });
+    await expect(getDocument(cached, taskB.id)).rejects.toMatchObject({
+      status: 404,
+    });
+    await expect(
+      createDocument(cached, { ...content, projectId: projectB.id }),
+    ).rejects.toMatchObject({ status: 404 });
+    await setMember(principal, first.id, {
+      email: member.user.email,
+      role: "viewer",
+    });
+    expect((await requirePrincipal(request, { tokenOnly: true })).scope).toBe(
+      "read",
+    );
+    await expect(
+      createDocument(cached, { ...content, projectId: projectA.id }),
+    ).rejects.toMatchObject({ status: 403 });
+    await removeMember(principal, first.id, member.user.id);
+    expect(await findPrincipal(request, true)).toBeNull();
+    await expect(
+      createDocument(cached, { ...content, projectId: projectA.id }),
+    ).rejects.toMatchObject({ status: 404 });
+    const adminKey = await createToken(principal, {
+      name: "Admin bound A",
+      scope: "write",
+      teamId: first.id,
+    });
+    const adminToken = await requirePrincipal(
+      new Request("http://localhost/api/mcp", {
+        headers: { authorization: `Bearer ${adminKey.token}` },
+      }),
+      { tokenOnly: true },
+    );
+    await expect(getDocument(adminToken, taskB.id)).rejects.toMatchObject({
+      status: 404,
+    });
+  });
+  it("serializes last-owner changes and rejects stale team/project metadata", async () => {
+    const ownerA = await readyMember(principal, "owner");
+    const ownerB = await readyMember(principal, "owner");
+    const team = await createTeam(principal, {
+      name: "Owners",
+      description: "",
+    });
+    await setMember(principal, team.id, {
+      email: ownerA.user.email,
+      role: "owner",
+    });
+    await setMember(principal, team.id, {
+      email: ownerB.user.email,
+      role: "owner",
+    });
+    await removeMember(principal, team.id, principal.user.id);
+    const outcomes = await Promise.allSettled([
+      removeMember(ownerA, team.id, ownerA.user.id),
+      removeMember(ownerB, team.id, ownerB.user.id),
+    ]);
+    expect(
+      outcomes.filter((result) => result.status === "fulfilled"),
+    ).toHaveLength(1);
+    const rejected = outcomes.find((result) => result.status === "rejected");
+    if (!rejected || rejected.status !== "rejected")
+      throw new Error("Expected last owner protection");
+    expect(rejected.reason).toMatchObject({ code: "LAST_TEAM_OWNER" });
+    await updateTeam(principal, team.id, {
+      name: "Renamed team",
+      description: "",
+      expectedVersion: 1,
+    });
+    await expect(
+      updateTeam(principal, team.id, {
+        name: "Stale",
+        description: "",
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({ code: "VERSION_CONFLICT" });
+    const project = await createProject(principal, {
+      teamId: team.id,
+      name: "Project",
+      description: "",
+    });
+    const task = await createDocument(principal, {
+      ...content,
+      projectId: project.id,
+    });
+    await updateProject(principal, project.id, {
+      name: "Renamed project",
+      description: "",
+      expectedVersion: 1,
+    });
+    await expect(
+      updateProject(principal, project.id, {
+        name: "Stale",
+        description: "",
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({ code: "VERSION_CONFLICT" });
+    expect(await getDocument(principal, task.id)).toMatchObject({
+      projectId: project.id,
+      projectName: "Renamed project",
+      currentRevision: 1,
+    });
+  });
+  it("checks membership after waiting for a revocation's team lock", async () => {
+    const member = await readyMember(principal, "editor");
+    const team = await createTeam(principal, {
+      name: "Revocation race",
+      description: "",
+    });
+    await setMember(principal, team.id, {
+      email: member.user.email,
+      role: "editor",
+    });
+    const project = await createProject(principal, {
+      teamId: team.id,
+      name: "Project",
+      description: "",
+    });
+    const task = await createDocument(member, {
+      ...content,
+      projectId: project.id,
+    });
+    const blocker = await db.connect();
+    let pending: ReturnType<typeof updateDocumentStatus> | undefined;
+    let outcome: Promise<PromiseSettledResult<unknown>[]> | undefined;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT id FROM teams WHERE id=$1 FOR UPDATE", [
+        team.id,
+      ]);
+      pending = updateDocumentStatus(member, task.id, {
+        expectedVersion: 1,
+        status: "ready",
+      });
+      outcome = Promise.allSettled([pending]);
+      await waitForBlockedQuery("SELECT id FROM teams WHERE id=$1 FOR SHARE");
+      await blocker.query(
+        "DELETE FROM team_memberships WHERE team_id=$1 AND user_id=$2",
+        [team.id, member.user.id],
+      );
+      await blocker.query("COMMIT");
+      await expect(pending).rejects.toMatchObject({ status: 404 });
+      expect((await getDocument(principal, task.id)).currentRevision).toBe(1);
+    } finally {
+      await blocker.query("ROLLBACK");
+      blocker.release();
+      if (outcome) await outcome;
+    }
+  });
+  it("paginates more than 200 authorized tasks without dropping microsecond timestamps or tied rows", async () => {
+    const team = await createTeam(principal, {
+      name: "Pages",
+      description: "",
+    });
+    const project = await createProject(principal, {
+      teamId: team.id,
+      name: "Pages",
+      description: "",
+    });
+    await transaction(async (client) => {
+      for (let index = 0; index < 205; index++) {
+        const id = crypto.randomUUID();
+        await client.query(
+          "INSERT INTO documents(id,project_id,current_revision,updated_at,title,description,instructions,status,change_summary,author_id) VALUES($1,$2,1,$3,'Paged','','','draft','Initial',$4)",
+          [
+            id,
+            project.id,
+            index < 102
+              ? "2026-10-01T00:00:00.123456Z"
+              : "2026-10-01T00:00:00.123123Z",
+            principal.user.id,
+          ],
+        );
+        await client.query(
+          "INSERT INTO document_revisions(id,document_id,number,title,description,files,instructions,status,change_summary,author_id) VALUES($1,$2,1,'Paged','',$3::jsonb,'','draft','Initial',$4)",
+          [
+            crypto.randomUUID(),
+            id,
+            JSON.stringify(content.files),
+            principal.user.id,
+          ],
+        );
+      }
+    });
+    const ids: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await listDocuments(principal, {
+        projectId: project.id,
+        cursor,
+      });
+      ids.push(...page.map((task) => task.id));
+      cursor = nextDocumentCursor(page) ?? undefined;
+    } while (cursor);
+    expect(ids).toHaveLength(205);
+    expect(new Set(ids).size).toBe(205);
+  });
+  it("migrates existing accounts, keys and placement without changing revisioned content or comments", async () => {
+    const previousMigrations = await Promise.all(
+      [
+        "001_initial.sql",
+        "002_token_expiry.sql",
+        "003_planning_lifecycle.sql",
+        "004_token_identifier.sql",
+        "005_document_metadata.sql",
+        "006_planning_files.sql",
+        "007_ai_canvas.sql",
+      ].map((name) =>
+        readFile(resolve(process.cwd(), "migrations", name), "utf8"),
+      ),
+    );
+    const migration = await readFile(
+      resolve(process.cwd(), "migrations/008_teams_projects.sql"),
+      "utf8",
+    );
+    const schema = `migration_${crypto.randomUUID().replaceAll("-", "")}`;
+    await transaction(async (client) => {
+      await client.query(`CREATE SCHEMA ${schema}`);
+      await client.query(`SET LOCAL search_path TO ${schema},public`);
+      for (const sql of previousMigrations) await client.query(sql);
+      const userIds = [
+        crypto.randomUUID(),
+        crypto.randomUUID(),
+        crypto.randomUUID(),
+      ];
+      for (const [index, role] of ["admin", "editor", "viewer"].entries())
+        await client.query(
+          "INSERT INTO users(id,name,email,password_hash,role,must_change_password) VALUES($1,$2,$3,'fixture',$2,false)",
+          [userIds[index], role, `${role}@example.test`],
+        );
+      const id = crypto.randomUUID();
+      await client.query(
+        "INSERT INTO documents(id,current_revision,title,description,instructions,status,change_summary,author_id) VALUES($1,1,'Original','','Original instructions','draft','Initial',$2)",
+        [id, userIds[0]],
+      );
+      await client.query(
+        "INSERT INTO document_revisions(id,document_id,number,title,description,files,instructions,status,change_summary,author_id) VALUES($1,$2,1,'Original','',$3::jsonb,'Original instructions','draft','Initial',$4)",
+        [crypto.randomUUID(), id, JSON.stringify(content.files), userIds[0]],
+      );
+      await client.query(
+        "INSERT INTO comments(id,document_id,author_id,body) VALUES($1,$2,$3,'Original comment')",
+        [crypto.randomUUID(), id, userIds[1]],
+      );
+      const tokenId = crypto.randomUUID();
+      await client.query(
+        "INSERT INTO api_tokens(id,user_id,name,scope,secret_hash,token_suffix) VALUES($1,$2,'Original key','write','fixture-hash','abcd')",
+        [tokenId, userIds[0]],
+      );
+      const revisions = (await client.query("SELECT * FROM document_revisions"))
+        .rows;
+      const comments = (await client.query("SELECT * FROM comments")).rows;
+      const originalToken = (
+        await client.query(
+          "SELECT expires_at,secret_hash,token_suffix FROM api_tokens",
+        )
+      ).rows[0];
+      await client.query(migration);
+      expect(
+        (await client.query("SELECT * FROM document_revisions")).rows,
+      ).toEqual(revisions);
+      expect((await client.query("SELECT * FROM comments")).rows).toEqual(
+        comments,
+      );
+      expect(
+        (
+          await client.query(
+            "SELECT expires_at,secret_hash,token_suffix,team_id FROM api_tokens",
+          )
+        ).rows[0],
+      ).toEqual({ ...originalToken, team_id: initialTeamId });
+      expect(
+        (
+          await client.query("SELECT project_id FROM documents WHERE id=$1", [
+            id,
+          ])
+        ).rows[0].project_id,
+      ).toBe(initialProjectId);
+      expect(
+        (
+          await client.query("SELECT role FROM team_memberships ORDER BY role")
+        ).rows.map((row) => row.role),
+      ).toEqual(["editor", "owner", "viewer"]);
+      expect(
+        (await client.query("SELECT role FROM users ORDER BY role")).rows.map(
+          (row) => row.role,
+        ),
+      ).toEqual(["global_admin", "user", "user"]);
+      await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+      await client.query(`SET LOCAL search_path TO public`);
+      await client.query(`DROP SCHEMA ${schema} CASCADE`);
+    });
+  });
   it("seeds exactly once after the start account has been renamed, even without its password", async () => {
     delete process.env.SEED_ADMIN_PASSWORD;
     await Promise.all([seedBootstrap(), seedBootstrap()]);
@@ -151,7 +671,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     const email = "legacy-upgrade@example.test";
     const startingPassword = "Legacy initial password 123";
     const password = "Legacy current password 456";
-    const user = await createUser(principal, {
+    const user = await createMember(principal, {
       name: "Legacy user",
       email,
       password: startingPassword,
@@ -166,6 +686,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     });
     const identity = await sessionPrincipal(ready.secret);
     const key = await createToken(identity, {
+      teamId: initialTeamId,
       name: "Preserved legacy key",
       scope: "write",
     });
@@ -247,6 +768,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     );
     const cookie = `planroom_session=${account.secret}`;
     const key = await createToken(principal, {
+      teamId: initialTeamId,
       name: "Bearer precedence",
       scope: "read",
     });
@@ -600,7 +1122,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     const original = await createDocument(principal, content);
     for (const identity of [
       { ...principal, scope: "read" as const },
-      { ...principal, user: { ...principal.user, role: "viewer" as const } },
+      await readyMember(principal, "viewer"),
     ]) {
       await expect(
         updateDocumentStatus(identity, original.id, {
@@ -619,6 +1141,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
   });
   it("persists just the last four key characters and never lists the complete secret", async () => {
     const created = await createToken(principal, {
+      teamId: initialTeamId,
       name: "Suffix identification",
       scope: "read",
     });
@@ -654,6 +1177,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
   });
   it("enforces token scope and inherited user role and never accepts cookies at MCP", async () => {
     const record = await createToken(principal, {
+      teamId: initialTeamId,
       name: "Read integration",
       scope: "read",
     });
@@ -670,7 +1194,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
         name: "Forbidden user",
         email: "forbidden@example.test",
         password: "Long password here 123",
-        role: "viewer",
+        role: "user",
       }),
     ).rejects.toBeInstanceOf(AppError);
     const account = await login(
@@ -688,6 +1212,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     await deleteToken(principal, record.record.id);
     expect(await findPrincipal(request, true)).toBeNull();
     const writeRecord = await createToken(principal, {
+      teamId: initialTeamId,
       name: "Write integration",
       scope: "write",
     });
@@ -702,10 +1227,14 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
         name: "Forbidden user",
         email: "forbidden@example.test",
         password: "Long password here 123",
-        role: "viewer",
+        role: "user",
       }),
     ).rejects.toMatchObject({ code: "SESSION_REQUIRED" });
-    await db.query("UPDATE users SET role='viewer' WHERE id=$1", [
+    await db.query(
+      "UPDATE team_memberships SET role='viewer' WHERE team_id='dca0733b-3325-4efa-9b43-2e71e537b001' AND user_id=$1",
+      [principal.user.id],
+    );
+    await db.query("UPDATE users SET role='user' WHERE id=$1", [
       principal.user.id,
     ]);
     try {
@@ -716,11 +1245,11 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
         ),
       ).rejects.toMatchObject({ status: 403 });
     } finally {
-      await db.query("UPDATE users SET role='admin' WHERE id=$1", [
+      await db.query("UPDATE users SET role='global_admin' WHERE id=$1", [
         principal.user.id,
       ]);
     }
-    const viewer = await createUser(principal, {
+    const viewer = await createMember(principal, {
       name: "Viewer user",
       email: "viewer@example.test",
       password: "Long viewer password 123",
@@ -774,7 +1303,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     const startingPassword = "First rotation password 123";
     const oldPassword = "Current rotation password 456";
     const newPassword = "New rotation password 789";
-    const user = await createUser(principal, {
+    const user = await createMember(principal, {
       name: "Rotation user",
       email,
       password: startingPassword,
@@ -789,6 +1318,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     });
     const stale = await sessionPrincipal(ready.secret);
     const tokenBefore = await createToken(stale, {
+      teamId: initialTeamId,
       name: "Before rotation",
       scope: "write",
     });
@@ -814,12 +1344,18 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
       });
       // Hold the actual database lock until rotation is queued first, then
       // queue the old login behind it. No password implementation is mocked.
-      await waitForBlockedQuery("SELECT * FROM users WHERE id=$1 FOR UPDATE");
+      await waitForBlockedQuery(
+        "SELECT * FROM users WHERE id=$1 FOR NO KEY UPDATE",
+      );
       tokenOutcome = Promise.allSettled([
-        createToken(stale, { name: "Queued across rotation", scope: "write" }),
+        createToken(stale, {
+          teamId: initialTeamId,
+          name: "Queued across rotation",
+          scope: "write",
+        }),
       ]);
       await waitForBlockedQuery(
-        "SELECT * FROM users WHERE id=$1 FOR UPDATE",
+        "SELECT * FROM users WHERE id=$1 FOR NO KEY UPDATE",
         2,
       );
       oldLogin = login(email, oldPassword);
@@ -859,7 +1395,11 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
         ),
       ).toBeNull();
       await expect(
-        createToken(stale, { name: "After revoked session", scope: "write" }),
+        createToken(stale, {
+          teamId: initialTeamId,
+          name: "After revoked session",
+          scope: "write",
+        }),
       ).rejects.toMatchObject({ status: 401, code: "UNAUTHENTICATED" });
       await expect(
         replaceAccount(stale, {
@@ -905,10 +1445,12 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
       return new Response(null, { status: 405 });
     };
     const writerToken = await createToken(principal, {
+      teamId: initialTeamId,
       name: "MCP protocol writer",
       scope: "write",
     });
     const readerToken = await createToken(principal, {
+      teamId: initialTeamId,
       name: "MCP protocol reader",
       scope: "read",
     });
@@ -949,9 +1491,10 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
           .object({ files: planningFilesSchema, currentRevision: z.number() })
           .parse(parsed),
       ).toEqual({ files: content.files, currentRevision: 1 });
+      const { projectId: _projectId, ...updateContent } = content;
       const update = {
         id: original.id,
-        ...content,
+        ...updateContent,
         files: [{ ...content.files[0], content: "<h1>MCP update</h1>" }],
         expectedVersion: 1,
         changeSummary: "Updated via MCP",
@@ -1034,6 +1577,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
       await db.query<{ count: string }>("SELECT count(*) FROM documents")
     ).rows[0].count;
     const key = await createToken(principal, {
+      teamId: initialTeamId,
       name: "Revoked write regression",
       scope: "write",
     });
@@ -1085,6 +1629,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
   it("uses the current role and scope when a write reaches its transaction", async () => {
     const document = await createDocument(principal, content);
     const key = await createToken(principal, {
+      teamId: initialTeamId,
       name: "Changed privilege regression",
       scope: "write",
     });
@@ -1103,7 +1648,11 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     await db.query("UPDATE api_tokens SET scope='write' WHERE id=$1", [
       key.record.id,
     ]);
-    await db.query("UPDATE users SET role='viewer' WHERE id=$1", [
+    await db.query(
+      "UPDATE team_memberships SET role='viewer' WHERE team_id='dca0733b-3325-4efa-9b43-2e71e537b001' AND user_id=$1",
+      [principal.user.id],
+    );
+    await db.query("UPDATE users SET role='user' WHERE id=$1", [
       principal.user.id,
     ]);
     try {
@@ -1113,7 +1662,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
         }),
       ).rejects.toMatchObject({ status: 403, code: "FORBIDDEN" });
     } finally {
-      await db.query("UPDATE users SET role='admin' WHERE id=$1", [
+      await db.query("UPDATE users SET role='global_admin' WHERE id=$1", [
         principal.user.id,
       ]);
     }
@@ -1135,11 +1684,12 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
       await blocker.query("BEGIN");
       await blocker.query("LOCK TABLE api_tokens IN ACCESS EXCLUSIVE MODE");
       issued = createToken(identity, {
+        teamId: initialTeamId,
         name: "Logout race regression",
         scope: "read",
       });
       await waitForBlockedQuery(
-        "INSERT INTO api_tokens(id,user_id,name,scope,secret_hash,token_suffix) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,name,scope,created_at,last_used_at,expires_at,token_suffix",
+        "INSERT INTO api_tokens(id,user_id,name,scope,secret_hash,token_suffix,team_id) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id,team_id,name,scope,created_at,last_used_at,expires_at,token_suffix",
       );
       loggedOut = logout(
         new Request("http://localhost/api/auth/logout", {
@@ -1159,7 +1709,11 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
         ),
       ).toBeNull();
       await expect(
-        createToken(identity, { name: "After logout", scope: "read" }),
+        createToken(identity, {
+          teamId: initialTeamId,
+          name: "After logout",
+          scope: "read",
+        }),
       ).rejects.toMatchObject({ status: 401, code: "UNAUTHENTICATED" });
       await deleteToken(principal, result.record.id);
     } finally {
@@ -1172,7 +1726,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
   it("locks a real account for ten full minutes starting at its fifth failure, and resets after recovery", async () => {
     const email = "lockout-policy@example.test";
     const password = "Valid lockout password 123";
-    await createUser(principal, {
+    await createMember(principal, {
       name: "Lockout regression",
       email,
       password,
@@ -1258,6 +1812,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
   });
   it("expires API keys after ninety days and rejects a cached key from all document writes", async () => {
     const key = await createToken(principal, {
+      teamId: initialTeamId,
       name: "Expiry regression",
       scope: "write",
     });
@@ -1452,6 +2007,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
   it("draws through the official MCP SDK and reads the same durable diagram", async () => {
     const original = await createDocument(principal, content);
     const key = await createToken(principal, {
+      teamId: initialTeamId,
       name: "AI canvas SDK",
       scope: "write",
     });
@@ -1517,6 +2073,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
   it("rechecks revoked canvas credentials before saving", async () => {
     const original = await createDocument(principal, content);
     const key = await createToken(principal, {
+      teamId: initialTeamId,
       name: "Canvas revocation",
       scope: "write",
     });
@@ -1770,6 +2327,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     );
     for (const invalidation of ["revoke", "expire"] as const) {
       const key = await createToken(principal, {
+        teamId: initialTeamId,
         name: `Slow read ${invalidation}`,
         scope: "read",
       });

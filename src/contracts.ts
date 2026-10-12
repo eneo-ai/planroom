@@ -2,7 +2,17 @@ import { z } from "zod";
 import { canvasSchema, canvasOperationSchema } from "./canvas";
 import { githubLinksInputSchema, githubLinksSchema } from "./github-links";
 
-export const roleSchema = z.enum(["admin", "editor", "viewer"]);
+export const roleSchema = z.enum(["global_admin", "user"]);
+export const teamRoleSchema = z.enum(["owner", "editor", "viewer"]);
+export type TeamRole = z.infer<typeof teamRoleSchema>;
+export const teamRoleLabels: Record<TeamRole, string> = {
+  owner: "Teamägare",
+  editor: "Redaktör",
+  viewer: "Läsare",
+};
+export function canWriteTeam(role: TeamRole): boolean {
+  return role !== "viewer";
+}
 export const statusSchema = z.enum([
   "draft",
   "active",
@@ -101,6 +111,51 @@ export type PlanningFile = z.infer<typeof planningFileSchema>;
 export type PlanningFileSummary = z.infer<typeof planningFileSummarySchema>;
 export const tokenScopeSchema = z.enum(["read", "write"]);
 const timestampSchema = z.iso.datetime();
+export const entityVersionSchema = revisionNumberSchema;
+export const teamSchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  description: z.string(),
+  version: entityVersionSchema,
+  role: teamRoleSchema,
+});
+export const projectSchema = z.object({
+  id: z.uuid(),
+  teamId: z.uuid(),
+  teamName: z.string(),
+  name: z.string(),
+  description: z.string(),
+  version: entityVersionSchema,
+  role: teamRoleSchema,
+});
+export const teamMemberSchema = z.object({
+  userId: z.uuid(),
+  name: z.string(),
+  email: z.email(),
+  role: teamRoleSchema,
+});
+export const teamsResponseSchema = z.object({ teams: z.array(teamSchema) });
+export const projectsResponseSchema = z.object({
+  projects: z.array(projectSchema),
+});
+export const membersResponseSchema = z.object({
+  members: z.array(teamMemberSchema),
+});
+export const namedEntityInputSchema = z.strictObject({
+  name: z.string().trim().min(1).max(200),
+  description: z.string().trim().max(2000).default(""),
+});
+export const updateNamedEntitySchema = namedEntityInputSchema.extend({
+  expectedVersion: entityVersionSchema,
+});
+export const createProjectSchema = namedEntityInputSchema.extend({
+  teamId: z.uuid(),
+});
+export type Team = z.infer<typeof teamSchema>;
+export type Project = z.infer<typeof projectSchema>;
+export type TeamMember = z.infer<typeof teamMemberSchema>;
+export type NamedEntityInput = z.infer<typeof namedEntityInputSchema>;
+export type NamedEntityUpdate = z.infer<typeof updateNamedEntitySchema>;
 export const userSchema = z.object({
   id: z.uuid(),
   name: z.string(),
@@ -110,6 +165,11 @@ export const userSchema = z.object({
 });
 export const documentSummarySchema = z.object({
   id: z.uuid(),
+  projectId: z.uuid(),
+  projectName: z.string(),
+  teamId: z.uuid(),
+  teamName: z.string(),
+  role: teamRoleSchema,
   title: z.string(),
   description: z.string(),
   status: statusSchema,
@@ -158,6 +218,7 @@ export const commentResponseSchema = z.object({
 });
 export const apiTokenSchema = z.object({
   id: z.uuid(),
+  teamId: z.uuid(),
   name: z.string(),
   scope: tokenScopeSchema,
   createdAt: timestampSchema,
@@ -180,6 +241,11 @@ export const userResponseSchema = z.object({ user: userSchema });
 export const sessionResponseSchema = z.object({ user: userSchema.nullable() });
 export const documentsResponseSchema = z.object({
   documents: z.array(documentSummarySchema),
+  nextCursor: z.string().nullable(),
+});
+export const documentCursorSchema = z.strictObject({
+  updatedAt: timestampSchema,
+  id: z.uuid(),
 });
 export const revisionsResponseSchema = z.object({
   revisions: z.array(revisionSummarySchema),
@@ -227,6 +293,10 @@ export const emailSchema = z
   .email()
   .max(254)
   .transform((value) => value.toLowerCase());
+export const setTeamMemberSchema = z.strictObject({
+  email: emailSchema,
+  role: teamRoleSchema,
+});
 export const loginSchema = z.object({
   email: emailSchema,
   password: z.string().min(1).max(256),
@@ -243,7 +313,7 @@ export const createUserSchema = z.object({
   password: passwordSchema,
   role: roleSchema,
 });
-export const documentContentSchema = z.object({
+export const documentContentSchema = z.strictObject({
   title: z.string().trim().min(1).max(200),
   description: z.string().trim().max(2000).default(""),
   files: planningFilesSchema,
@@ -251,6 +321,10 @@ export const documentContentSchema = z.object({
   status: statusSchema.default("draft"),
   changeSummary: z.string().trim().min(1).max(1000),
 });
+export const createDocumentSchema = documentContentSchema.extend({
+  projectId: z.uuid(),
+});
+export type DocumentCreate = z.infer<typeof createDocumentSchema>;
 export const updateDocumentSchema = documentContentSchema.extend({
   expectedVersion: revisionNumberSchema,
 });
@@ -271,6 +345,7 @@ export const commentSchema = z.object({
   sectionId: z.string().max(200).nullable().optional(),
 });
 export const createTokenSchema = z.object({
+  teamId: z.uuid(),
   name: z.string().trim().min(1).max(100),
   scope: tokenScopeSchema,
 });

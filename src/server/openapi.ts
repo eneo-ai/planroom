@@ -3,6 +3,16 @@ import {
   updateCanvasSchema,
   documentCanvasSchema,
   apiDiscoverySchema,
+  createDocumentSchema,
+  createProjectSchema,
+  namedEntityInputSchema,
+  updateNamedEntitySchema,
+  setTeamMemberSchema,
+  teamSchema,
+  teamsResponseSchema,
+  projectSchema,
+  projectsResponseSchema,
+  membersResponseSchema,
   apiErrorBodySchema,
   apiTokenSchema,
   commentResponseSchema,
@@ -108,6 +118,12 @@ const requestSchemas = {
   SetupRequest: setupSchema,
   CreateUserRequest: createUserSchema,
   DocumentContent: documentContentSchema,
+  DocumentCreate: createDocumentSchema,
+  CreateProject: createProjectSchema,
+  NamedEntityInput: namedEntityInputSchema,
+  NamedEntityUpdate: updateNamedEntitySchema,
+  SetTeamMember: setTeamMemberSchema,
+
   DocumentUpdate: updateDocumentSchema,
   DocumentStatusUpdate: updateDocumentStatusSchema,
   DocumentGitHubLinksUpdate: updateDocumentGitHubLinksSchema,
@@ -118,6 +134,12 @@ const requestSchemas = {
 const responseSchemas = {
   DocumentCanvas: documentCanvasSchema,
   User: userSchema,
+  Team: teamSchema,
+  TeamsResponse: teamsResponseSchema,
+  Project: projectSchema,
+  ProjectsResponse: projectsResponseSchema,
+  MembersResponse: membersResponseSchema,
+
   DocumentSummary: documentSummarySchema,
   DocumentDetail: documentDetailSchema,
   DocumentGitHubLinks: documentGitHubLinksSchema,
@@ -223,7 +245,7 @@ const optionalOrigin: Parameter = {
 const ready =
   " All document and token operations require mustChangePassword=false. Complete POST /api/auth/setup before accessing the workspace.";
 const writes =
-  " Requires admin/editor role and, for bearer authentication, a write-scope API key. Cookie-authenticated writes require a same-origin Origin header. Changes are saved immediately. Changed file collections or canvas content create a revision; changeSummary describes the change.";
+  " Requires owner/editor team membership or globaladmin oversight and, for bearer authentication, a write-scope key bound to that team. Cookie-authenticated writes require a same-origin Origin header. Changes are saved immediately. Changed file collections or canvas content create a revision; changeSummary describes the change.";
 
 export const apiDiscovery = apiDiscoverySchema.parse({
   name: "Planroom REST API",
@@ -275,7 +297,7 @@ export const openApiDocument: OpenApiDocument = {
     {
       name: "Administration",
       description:
-        "Users in the shared workspace; admin browser session required.",
+        "Installation accounts; globaladmin browser session required.",
     },
     {
       name: "Service",
@@ -445,16 +467,213 @@ export const openApiDocument: OpenApiDocument = {
         },
       },
     },
+    "/api/teams": {
+      get: {
+        operationId: "listTeams",
+        summary: "List accessible teams",
+        description:
+          "Members see their teams. Globaladmin sees all. Bearer keys see only their bound team.",
+        tags: ["Teams"],
+        security: security.document,
+        responses: {
+          "200": jsonResponse(
+            "Accessible teams and effective roles.",
+            "TeamsResponse",
+          ),
+          ...errors(401, 403, 500),
+        },
+      },
+      post: {
+        operationId: "createTeam",
+        summary: "Create a team",
+        description:
+          "Globaladmin browser session required. The creator becomes the first owner.",
+        tags: ["Teams"],
+        security: security.session,
+        parameters: [origin],
+        requestBody: body("NamedEntityInput"),
+        responses: {
+          "201": jsonResponse("Created team.", "Team"),
+          ...errors(400, 401, 403, 408, 413, 415, 500, 503),
+        },
+      },
+    },
+    "/api/teams/{id}": {
+      get: {
+        operationId: "getTeam",
+        summary: "Read a team",
+        description:
+          "Nonmembers receive NOT_FOUND. Globaladmin can read all teams.",
+        tags: ["Teams"],
+        security: security.document,
+        parameters: [id],
+        responses: {
+          "200": jsonResponse("Team metadata.", "Team"),
+          ...errors(400, 401, 403, 404, 500),
+        },
+      },
+      put: {
+        operationId: "updateTeam",
+        summary: "Rename or describe a team",
+        description:
+          "Team owner or globaladmin browser session required. expectedVersion rejects stale writes with VERSION_CONFLICT. Parent relationships cannot change.",
+        tags: ["Teams"],
+        security: security.session,
+        parameters: [id, origin],
+        requestBody: body("NamedEntityUpdate"),
+        responses: {
+          "200": jsonResponse("Updated team.", "Team"),
+          ...errors(400, 401, 403, 404, 408, 409, 413, 415, 500, 503),
+        },
+      },
+    },
+    "/api/teams/{id}/members": {
+      get: {
+        operationId: "listMembers",
+        summary: "List team members",
+        description:
+          "Team owner or globaladmin browser session required. Ordinary editors/viewers cannot inspect account emails.",
+        tags: ["Teams"],
+        security: security.session,
+        parameters: [id],
+        responses: {
+          "200": jsonResponse("Team members.", "MembersResponse"),
+          ...errors(400, 401, 403, 404, 500),
+        },
+      },
+      put: {
+        operationId: "setMember",
+        summary: "Add a member or change their role",
+        description:
+          "Team owner or globaladmin browser session required. Uses an existing account email; unknown accounts return USER_NOT_FOUND. LAST_TEAM_OWNER prevents demoting the final owner.",
+        tags: ["Teams"],
+        security: security.session,
+        parameters: [id, origin],
+        requestBody: body("SetTeamMember"),
+        responses: {
+          "200": jsonResponse("Membership saved.", "OkResponse"),
+          ...errors(400, 401, 403, 404, 408, 409, 413, 415, 500, 503),
+        },
+      },
+    },
+    "/api/teams/{id}/members/{userId}": {
+      delete: {
+        operationId: "removeMember",
+        summary: "Remove team membership",
+        description:
+          "Team owner or globaladmin browser session required. LAST_TEAM_OWNER protects the final owner. Globaladmin retains their explicit installation-wide access.",
+        tags: ["Teams"],
+        security: security.session,
+        parameters: [
+          id,
+          { ...id, name: "userId", description: "Member account UUID." },
+          origin,
+        ],
+        responses: {
+          "200": jsonResponse("Membership removed.", "OkResponse"),
+          ...errors(400, 401, 403, 404, 409, 500, 503),
+        },
+      },
+    },
+    "/api/projects": {
+      get: {
+        operationId: "listProjects",
+        summary: "List accessible projects",
+        description:
+          "Only projects in authorized teams are returned; bearer keys are team-bound.",
+        tags: ["Projects"],
+        security: security.document,
+        parameters: [
+          {
+            name: "teamId",
+            in: "query",
+            description: "Optional authorized team UUID.",
+            schema: z.toJSONSchema(z.uuid()),
+          },
+        ],
+        responses: {
+          "200": jsonResponse("Accessible projects.", "ProjectsResponse"),
+          ...errors(400, 401, 403, 404, 500),
+        },
+      },
+      post: {
+        operationId: "createProject",
+        summary: "Create a project",
+        description:
+          "Requires explicit teamId and owner/editor membership or globaladmin." +
+          writes,
+        tags: ["Projects"],
+        security: security.document,
+        parameters: [optionalOrigin],
+        requestBody: body("CreateProject"),
+        responses: {
+          "201": jsonResponse("Created project.", "Project"),
+          ...errors(400, 401, 403, 404, 408, 413, 415, 500, 503),
+        },
+      },
+    },
+    "/api/projects/{id}": {
+      get: {
+        operationId: "getProject",
+        summary: "Read project context",
+        description:
+          "Projects inherit their team's access; unauthorized UUIDs return NOT_FOUND.",
+        tags: ["Projects"],
+        security: security.document,
+        parameters: [id],
+        responses: {
+          "200": jsonResponse(
+            "Project metadata and effective role.",
+            "Project",
+          ),
+          ...errors(400, 401, 403, 404, 500),
+        },
+      },
+      put: {
+        operationId: "updateProject",
+        summary: "Rename or describe a project",
+        description:
+          "expectedVersion protects against stale metadata writes; VERSION_CONFLICT requires a reread. Team placement cannot change." +
+          writes,
+        tags: ["Projects"],
+        security: security.document,
+        parameters: [id, optionalOrigin],
+        requestBody: body("NamedEntityUpdate"),
+        responses: {
+          "200": jsonResponse("Updated project.", "Project"),
+          ...errors(400, 401, 403, 404, 408, 409, 413, 415, 500, 503),
+        },
+      },
+    },
     "/api/documents": {
       get: {
         operationId: "listDocuments",
         summary: "Find planning documents",
         description:
-          "Returns up to 200 latest documents sorted by updatedAt descending. Search matches title and description case-insensitively." +
+          "Returns up to 100 authorized tasks (nextCursor continues the listing) sorted by updatedAt descending. Search matches title and description case-insensitively." +
           ready,
         tags: ["Documents"],
         security: security.document,
         parameters: [
+          {
+            name: "teamId",
+            in: "query",
+            description: "Limit to an accessible team.",
+            schema: { type: "string", format: "uuid" },
+          },
+          {
+            name: "projectId",
+            in: "query",
+            description: "Limit to an accessible project.",
+            schema: { type: "string", format: "uuid" },
+          },
+          {
+            name: "cursor",
+            in: "query",
+            description:
+              "nextCursor returned by the previous page; pass unchanged.",
+            schema: { type: "string", maxLength: 200 },
+          },
           {
             name: "q",
             in: "query",
@@ -478,7 +697,7 @@ export const openApiDocument: OpenApiDocument = {
       },
       post: {
         operationId: "createDocument",
-        summary: "Create a planning document",
+        summary: "Create a planning task in a project",
         description:
           "Creates one or more original HTML/Markdown files and instructions as revision 1. files contains up to 20 entries with a unique UUID id, unique case-insensitive filename, format (html or markdown) and original content. Extensions must match the format. Sources total at most 2,000,000 characters; JSON is also bounded to 3 MiB." +
           ready +
@@ -486,7 +705,7 @@ export const openApiDocument: OpenApiDocument = {
         tags: ["Documents"],
         security: security.document,
         parameters: [optionalOrigin],
-        requestBody: body("DocumentContent"),
+        requestBody: body("DocumentCreate"),
         responses: {
           "201": jsonResponse("New current document.", "DocumentDetail"),
           ...errors(400, 401, 403, 408, 413, 415, 500, 503),
@@ -732,7 +951,7 @@ export const openApiDocument: OpenApiDocument = {
         operationId: "createApiKey",
         summary: "Create a scoped personal API key",
         description:
-          "Requires an active browser session and same-origin Origin. Viewers can create read keys; admin/editor users can create read or write keys. Keys expire 90 days after creation; expiresAt and maskedToken (eight asterisks plus the last four secret characters) are included in record. Create a replacement before expiry and update your client. The complete secret appears only in this response; keep it outside source control. Keys inherit the user's current role on every request, and document writes revalidate credentials inside their transaction." +
+          "Requires an active browser session and same-origin Origin. teamId is required. Team viewers can create read keys; owners/editors and globaladmin can create read or write keys. Keys expire 90 days after creation; expiresAt and maskedToken (eight asterisks plus the last four secret characters) are included in record. Create a replacement before expiry and update your client. The complete secret appears only in this response; keep it outside source control. Keys inherit the current membership in their bound team on every request, and document writes revalidate credentials inside their transaction." +
           ready,
         tags: ["API keys"],
         security: security.session,
@@ -832,7 +1051,7 @@ export const openApiDocument: OpenApiDocument = {
         scheme: "bearer",
         bearerFormat: "Opaque personal API key",
         description:
-          "Send Authorization: Bearer <key>. Create keys in Settings → AI and API. Read keys permit reads only; write keys also require an admin/editor user role. Account setup must already be complete. Bearer keys cannot change accounts, create/revoke keys or administer users.",
+          "Send Authorization: Bearer <key>. Create keys in Settings → AI and API. Read keys permit reads only; write keys also require owner/editor membership or globaladmin oversight in their bound team. Account setup must already be complete. Bearer keys cannot change accounts, create/revoke keys or administer users.",
       },
     },
   },

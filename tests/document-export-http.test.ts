@@ -7,6 +7,11 @@ import { AppError } from "../src/server/errors";
 
 const document = documentDetailSchema.parse({
   id: "123e4567-e89b-42d3-a456-426614174000",
+  projectId: "dca0733b-3325-4efa-9b43-2e71e537b002",
+  projectName: "Project",
+  teamId: "dca0733b-3325-4efa-9b43-2e71e537b001",
+  teamName: "Team",
+  role: "viewer",
   title: "Plan",
   description: "",
   status: "draft",
@@ -41,10 +46,11 @@ const principal: auth.Principal = {
     id: document.id,
     name: "Reader",
     email: "reader@example.test",
-    role: "viewer",
+    role: "user",
     mustChangePassword: false,
   },
   authentication: "token",
+  teamId: "dca0733b-3325-4efa-9b43-2e71e537b001",
   tokenHash: "0".repeat(64),
   scope: "read",
 };

@@ -18,7 +18,7 @@ export function AdminUsers() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState("editor");
+  const [role, setRole] = useState("user");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -55,7 +55,7 @@ export function AdminUsers() {
       });
       setUsers((current) => [...current, result.user]);
       setNotice(
-        `Kontot för ${result.user.name} är skapat. Lösenordet måste bytas vid första inloggningen.`,
+        `Kontot för ${result.user.name} är skapat. Lösenordet måste bytas vid första inloggningen. Lägg sedan till personen i rätt team.`,
       );
       setName("");
       setEmail("");
@@ -69,10 +69,11 @@ export function AdminUsers() {
   return (
     <div className="page-stack">
       <div>
-        <h2>Personer i arbetsytan</h2>
+        <h2>Konton i installationen</h2>
         <p className="muted">
-          Alla konton delar samma arbetsyta. Läsare kan läsa, redaktörer kan
-          uppdatera och administratörer kan skapa konton.
+          Globaladmin hanterar installationen och har åtkomst till alla team.
+          Övriga konton får åtkomst genom medlemskap och en roll i respektive
+          team.
         </p>
       </div>
       {error && (

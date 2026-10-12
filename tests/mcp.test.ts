@@ -12,10 +12,11 @@ const principal: Principal = {
     id: "123e4567-e89b-42d3-a456-426614174000",
     name: "Test editor",
     email: "editor@example.com",
-    role: "editor",
+    role: "user",
     mustChangePassword: false,
   },
   authentication: "token",
+  teamId: "dca0733b-3325-4efa-9b43-2e71e537b001",
   tokenHash: "0".repeat(64),
   scope: "read",
 };
@@ -49,6 +50,10 @@ describe("MCP permissions through the official SDK", () => {
     try {
       const listing = await session.client.listTools();
       expect(listing.tools.map((tool) => tool.name)).toEqual([
+        "list_teams",
+        "read_team",
+        "list_projects",
+        "read_project",
         "list_documents",
         "read_document",
         "read_document_github_links",
@@ -128,11 +133,10 @@ describe("MCP permissions through the official SDK", () => {
       await session.close();
     }
   });
-  it("keeps viewer access read-only even if presented with a write-scoped token", async () => {
+  it("keeps a token narrowed by team authorization read-only", async () => {
     const session = await connect({
       ...principal,
-      scope: "write",
-      user: { ...principal.user, role: "viewer" },
+      scope: "read",
     });
     try {
       expect(

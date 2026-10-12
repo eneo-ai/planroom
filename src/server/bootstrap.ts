@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
-  documentContentSchema,
+  createDocumentSchema,
   emailSchema,
   passwordSchema,
 } from "../contracts";
@@ -10,6 +10,7 @@ import { transaction } from "./db";
 import { createDocumentInTransaction } from "./documents";
 import { hashPassword } from "./passwords";
 import { userFromRow, type UserRow } from "./auth";
+import { initialTeamId, initialProjectId } from "./teams";
 
 /** Persisted markers survive renaming/deleting the original admin. */
 export async function seedBootstrap(): Promise<void> {
@@ -31,8 +32,12 @@ export async function seedBootstrap(): Promise<void> {
     const password = passwordSchema.parse(process.env.SEED_ADMIN_PASSWORD);
     const id = randomUUID();
     const created = await client.query<UserRow>(
-      "INSERT INTO users(id,name,email,password_hash,role,must_change_password) VALUES($1,'Startadministratör',$2,$3,'admin',true) RETURNING *",
+      "INSERT INTO users(id,name,email,password_hash,role,must_change_password) VALUES($1,'Startadministratör',$2,$3,'global_admin',true) RETURNING *",
       [id, email, await hashPassword(password)],
+    );
+    await client.query(
+      "INSERT INTO team_memberships(team_id,user_id,role) VALUES($1,$2,'owner')",
+      [initialTeamId, id],
     );
     if (process.env.SEED_EXAMPLE === "true") {
       const html = await readFile(
@@ -42,7 +47,8 @@ export async function seedBootstrap(): Promise<void> {
       await createDocumentInTransaction(
         client,
         userFromRow(created.rows[0]),
-        documentContentSchema.parse({
+        createDocumentSchema.parse({
+          projectId: initialProjectId,
           title: "Lansering av en kundportal",
           description: "Exempel på en visuell HTML-planering.",
           files: [

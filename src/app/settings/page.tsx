@@ -49,7 +49,7 @@ export default function SettingsPage() {
           icon={<KeyRound size={16} aria-hidden />}
           panelId="settings-tokens"
         />
-        {user?.role === "admin" && (
+        {user?.role === "global_admin" && (
           <Tab
             id="settings-users-tab"
             value="users"
@@ -83,7 +83,7 @@ export default function SettingsPage() {
       >
         {loaded.includes("tokens") && <ApiTokens />}
       </section>
-      {user?.role === "admin" && (
+      {user?.role === "global_admin" && (
         <section
           hidden={tab !== "users"}
           role="tabpanel"

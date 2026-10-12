@@ -94,18 +94,20 @@ export function AppFrame({ children }: { children: ReactNode }) {
         >
           <SideNavSection title="Arbetsyta">
             <SideNavItem
-              label="Planeringar"
+              label="Team och projekt"
               icon={<FileText size={18} aria-hidden />}
               href="/"
               isSelected={
                 pathname === "/" ||
+                pathname.startsWith("/teams/") ||
+                pathname.startsWith("/projects/") ||
                 (pathname.startsWith("/documents/") &&
                   pathname !== "/documents/new")
               }
             />
-            {user?.role !== "viewer" && (
+            {user && (
               <SideNavItem
-                label="Ny planering"
+                label="Ny uppgift"
                 icon={<Plus size={18} aria-hidden />}
                 href="/documents/new"
                 isSelected={pathname === "/documents/new"}
@@ -121,7 +123,9 @@ export function AppFrame({ children }: { children: ReactNode }) {
               label="API-dokumentation"
               icon={<Braces size={18} aria-hidden />}
               href="/api/docs"
-              isSelected={pathname === "/api/docs"}
+              isSelected={
+                pathname === "/api/docs" || pathname.startsWith("/shared/")
+              }
             />
           </SideNavSection>
           <div className="nav-note">
