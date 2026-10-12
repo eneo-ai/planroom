@@ -6,15 +6,19 @@ import { Button } from "@astryxdesign/core/Button";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Copy, ExternalLink, Share2 } from "lucide-react";
-import type { ProjectSharing, ProjectSharingUpdate } from "@/contracts";
+import type { DocumentSharing, DocumentSharingUpdate } from "@/contracts";
 import { api, errorMessage } from "@/client/api";
 
-export function ProjectSharingSettings({ projectId }: { projectId: string }) {
-  const [sharing, setSharing] = useState<ProjectSharing | null>(null);
+export function DocumentSharingSettings({
+  documentId,
+}: {
+  documentId: string;
+}) {
+  const [sharing, setSharing] = useState<DocumentSharing | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
-  const [action, setAction] = useState<ProjectSharingUpdate["action"] | null>(
+  const [action, setAction] = useState<DocumentSharingUpdate["action"] | null>(
     null,
   );
   const [origin, setOrigin] = useState("");
@@ -26,7 +30,7 @@ export function ProjectSharingSettings({ projectId }: { projectId: string }) {
     setSharing(null);
     setError("");
     setConflict(false);
-    void api<ProjectSharing>(`/api/projects/${projectId}/sharing`, {
+    void api<DocumentSharing>(`/api/documents/${documentId}/sharing`, {
       signal: controller.signal,
     })
       .then((value) => {
@@ -36,7 +40,7 @@ export function ProjectSharingSettings({ projectId }: { projectId: string }) {
         if (!controller.signal.aborted) setError(errorMessage(cause));
       });
     return () => controller.abort();
-  }, [projectId, reload]);
+  }, [documentId, reload]);
   const url = sharing?.path ? `${origin}${sharing.path}` : "";
   async function change() {
     if (!sharing || !action || busy) return;
@@ -44,8 +48,8 @@ export function ProjectSharingSettings({ projectId }: { projectId: string }) {
     setError("");
     setNotice("");
     try {
-      const result = await api<ProjectSharing>(
-        `/api/projects/${projectId}/sharing`,
+      const result = await api<DocumentSharing>(
+        `/api/documents/${documentId}/sharing`,
         {
           method: "PUT",
           body: JSON.stringify({ action, expectedVersion: sharing.version }),
@@ -55,7 +59,7 @@ export function ProjectSharingSettings({ projectId }: { projectId: string }) {
       setAction(null);
       setNotice(
         result.path
-          ? "Projektet kan nu läsas av alla som har länken."
+          ? "Planeringen kan nu läsas av alla som har länken."
           : "Publik delning är avstängd. Den tidigare länken fungerar inte längre.",
       );
     } catch (cause) {
@@ -83,13 +87,14 @@ export function ProjectSharingSettings({ projectId }: { projectId: string }) {
       ? "Stäng av publik delning?"
       : action === "rotate"
         ? "Byt delningslänk?"
-        : "Dela projektet publikt?";
+        : "Dela planeringen publikt?";
   return (
     <section className="narrow-content page-stack" aria-label="Publik delning">
       <div>
         <h2>Publik delning</h2>
         <p className="muted">
-          Visa projektet för personer utanför teamet utan att skapa konton.
+          Visa den här planeringens filer och skisser för personer utanför
+          teamet utan att skapa konton.
         </p>
       </div>
       {error && (
@@ -113,9 +118,9 @@ export function ProjectSharingSettings({ projectId }: { projectId: string }) {
             title={
               sharing.path
                 ? "Alla med länken kan läsa"
-                : "Projektet delas inte publikt"
+                : "Planeringen delas inte publikt"
             }
-            description="Länken visar projektets namn och beskrivning samt alla nuvarande och framtida uppgifter, filer och diagram, oavsett status. Diskussion, versionshistorik, AI-instruktioner och GitHub-kopplingar visas inte. Besökare kan inte ändra något."
+            description="Länken visar bara den här planeringen med dess HTML-filer, Markdown-filer och skisser, även när innehållet uppdateras. Andra planeringar i projektet delas inte. Diskussion, versionshistorik, AI-instruktioner och GitHub-kopplingar visas inte. Besökare kan inte ändra något."
           />
           {sharing.path && (
             <>
@@ -182,8 +187,8 @@ export function ProjectSharingSettings({ projectId }: { projectId: string }) {
             {action === "disable"
               ? "Den befintliga länken slutar fungera. Redan visat eller sparat innehåll kan inte tas tillbaka. Om du aktiverar delning igen skapas en ny länk."
               : action === "rotate"
-                ? "Den befintliga länken slutar fungera och ersätts med en ny. Dela den nya länken med de personer som ska kunna läsa projektet."
-                : "Alla som får länken kan läsa projektet och dess uppgifter utan att logga in, även uppgifter som läggs till senare. Länken kan vidarebefordras. Du kan stänga av delningen när som helst."}
+                ? "Den befintliga länken slutar fungera och ersätts med en ny. Dela den nya länken med de personer som ska kunna läsa planeringen."
+                : "Alla som får länken kan läsa den här planeringen och dess sparade filer och skisser utan att logga in. Senare ändringar i samma planering visas också. Andra planeringar i projektet förblir privata. Länken kan vidarebefordras och du kan stänga av den när som helst."}
           </p>
           <div className="button-row">
             <Button

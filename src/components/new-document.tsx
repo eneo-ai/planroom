@@ -46,7 +46,7 @@ export function NewDocument({ project }: { project: Project }) {
       <Banner
         status="info"
         title="Du har läsbehörighet"
-        description="Be teamägaren om redaktörsbehörighet för att skapa uppgifter."
+        description="Be teamägaren om redaktörsbehörighet för att skapa planeringar."
       />
     );
   async function submit(event: FormEvent) {
@@ -89,7 +89,7 @@ export function NewDocument({ project }: { project: Project }) {
           <p className="eyebrow">
             {project.teamName} / {project.name}
           </p>
-          <h1>Ny uppgift</h1>
+          <h1>Ny planering</h1>
           <p className="muted">
             Importera era HTML- och Markdown-filer och ge nästa person rätt
             sammanhang.
@@ -174,7 +174,7 @@ export function NewDocument({ project }: { project: Project }) {
             variant="ghost"
           />
           <Button
-            label="Skapa uppgift"
+            label="Skapa planering"
             type="submit"
             variant="primary"
             isLoading={busy}

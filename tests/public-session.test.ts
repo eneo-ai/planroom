@@ -45,7 +45,7 @@ async function render() {
 }
 
 describe("anonymous public navigation", () => {
-  it.each(["/shared/link", "/shared/link/documents/id"])(
+  it.each(["/shared/link"])(
     "renders %s without redirecting to sign in",
     async (path) => {
       navigation.path = path;

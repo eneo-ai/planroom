@@ -225,7 +225,7 @@ export default function TeamPage() {
             >
               <h3>{project.name}</h3>
               <p className="muted">
-                {project.description || "Uppgifter och planeringsmaterial."}
+                {project.description || "Planeringar med filer och skisser."}
               </p>
             </ClickableCard>
           ))}
@@ -349,7 +349,7 @@ export default function TeamPage() {
         <div className="dialog-content">
           <p>
             {removing?.name} förlorar åtkomsten till teamets projekt och
-            uppgifter. En globaladmin behåller sin globala åtkomst.
+            planeringar. En globaladmin behåller sin globala åtkomst.
           </p>
           {error && (
             <Banner

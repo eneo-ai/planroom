@@ -62,7 +62,7 @@ export default function TeamsPage() {
           <p className="eyebrow">TEAM OCH PROJEKT</p>
           <h1>{user?.role === "global_admin" ? "Alla team" : "Mina team"}</h1>
           <p className="muted">
-            Öppna ett team för att se dess projekt och uppgifter.
+            Öppna ett team för att se dess projekt och planeringar.
           </p>
         </div>
       </header>

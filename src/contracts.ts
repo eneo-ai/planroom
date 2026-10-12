@@ -376,39 +376,26 @@ export type DocumentCanvas = z.infer<typeof documentCanvasSchema>;
 // Public projections intentionally exclude membership, people, instructions,
 // discussion, history and GitHub references. Never serialize an internal detail.
 export const publicShareTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
-export const projectSharingSchema = z.object({
+export const documentSharingSchema = z.object({
   path: z
     .string()
     .regex(/^\/shared\/[A-Za-z0-9_-]{43}$/)
     .nullable(),
   version: entityVersionSchema,
 });
-export const updateProjectSharingSchema = z.strictObject({
+export const updateDocumentSharingSchema = z.strictObject({
   action: z.enum(["enable", "rotate", "disable"]),
   expectedVersion: entityVersionSchema,
 });
-export const sharedProjectSchema = projectSchema.pick({
-  name: true,
-  description: true,
-});
-export const sharedDocumentSummarySchema = documentSummarySchema.pick({
+export const sharedDocumentSchema = documentDetailSchema.pick({
   id: true,
   title: true,
   description: true,
   status: true,
   files: true,
+  canvas: true,
   updatedAt: true,
 });
-export const sharedDocumentSchema = sharedDocumentSummarySchema.extend({
-  files: z.array(planningFileSchema),
-  canvas: canvasSchema.nullable(),
-});
-export const sharedDocumentsResponseSchema = z.object({
-  documents: z.array(sharedDocumentSummarySchema),
-  nextCursor: z.string().nullable(),
-});
-export type ProjectSharing = z.infer<typeof projectSharingSchema>;
-export type ProjectSharingUpdate = z.infer<typeof updateProjectSharingSchema>;
-export type SharedProject = z.infer<typeof sharedProjectSchema>;
-export type SharedDocumentSummary = z.infer<typeof sharedDocumentSummarySchema>;
+export type DocumentSharing = z.infer<typeof documentSharingSchema>;
+export type DocumentSharingUpdate = z.infer<typeof updateDocumentSharingSchema>;
 export type SharedDocument = z.infer<typeof sharedDocumentSchema>;

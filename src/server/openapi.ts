@@ -2,12 +2,10 @@ import { z } from "zod";
 import {
   updateCanvasSchema,
   documentCanvasSchema,
-  projectSharingSchema,
-  updateProjectSharingSchema,
+  documentSharingSchema,
+  updateDocumentSharingSchema,
   publicShareTokenSchema,
-  sharedProjectSchema,
   sharedDocumentSchema,
-  sharedDocumentsResponseSchema,
   apiDiscoverySchema,
   createDocumentSchema,
   createProjectSchema,
@@ -119,7 +117,7 @@ interface OpenApiDocument {
 }
 
 const requestSchemas = {
-  ProjectSharingUpdate: updateProjectSharingSchema,
+  DocumentSharingUpdate: updateDocumentSharingSchema,
   CanvasUpdate: updateCanvasSchema,
   LoginRequest: loginSchema,
   SetupRequest: setupSchema,
@@ -139,10 +137,8 @@ const requestSchemas = {
   CreateTokenRequest: createTokenSchema,
 };
 const responseSchemas = {
-  ProjectSharing: projectSharingSchema,
-  SharedProject: sharedProjectSchema,
+  DocumentSharing: documentSharingSchema,
   SharedDocument: sharedDocumentSchema,
-  SharedDocumentsResponse: sharedDocumentsResponseSchema,
   DocumentCanvas: documentCanvasSchema,
   User: userSchema,
   Team: teamSchema,
@@ -324,94 +320,50 @@ export const openApiDocument: OpenApiDocument = {
     },
   ],
   paths: {
-    "/api/projects/{id}/sharing": {
+    "/api/documents/{id}/sharing": {
       get: {
-        operationId: "getProjectSharing",
-        summary: "Read project sharing settings",
+        operationId: "getDocumentSharing",
+        summary: "Read planning item sharing settings",
         description:
-          "Team owner or globaladmin browser session required. Returns the current share path and independent sharing version; never included in ordinary project listings.",
-        tags: ["Projects"],
+          "Team owner or globaladmin browser session required. Returns the current share path and independent sharing version; never included in ordinary document responses.",
+        tags: ["Documents"],
         security: security.session,
         parameters: [id],
         responses: {
-          "200": jsonResponse("Current sharing settings.", "ProjectSharing"),
+          "200": jsonResponse("Current sharing settings.", "DocumentSharing"),
           ...errors(400, 401, 403, 404, 500),
         },
       },
       put: {
-        operationId: "updateProjectSharing",
-        summary: "Enable, rotate or disable public project access",
+        operationId: "updateDocumentSharing",
+        summary: "Enable, rotate or disable public access to one planning item",
         description:
-          "Team owner or globaladmin browser session and same-origin request required. Use the sharing version as expectedVersion. SHARING_CONFLICT requires fetching settings and reviewing again. Rotation and disable invalidate the previous link. Re-enabling generates a fresh link. All current and future tasks, regardless of status, and their current files and diagrams become readable without an account; instructions, people, history, discussion and GitHub links stay private. No public writes. Downloaded or already displayed content cannot be recalled.",
-        tags: ["Projects"],
+          "Team owner or globaladmin browser session and same-origin request required. Use the sharing version as expectedVersion. SHARING_CONFLICT requires fetching settings and reviewing again. Rotation and disable invalidate the previous link; re-enabling generates a fresh link. Only this planning item and its current files and sketch become readable, including later changes to that same item. Other planning items in its project stay private. Instructions, people, history, discussion and GitHub links stay private. No public writes. Already delivered content cannot be recalled.",
+        tags: ["Documents"],
         security: security.session,
         parameters: [id, origin],
-        requestBody: body("ProjectSharingUpdate"),
+        requestBody: body("DocumentSharingUpdate"),
         responses: {
-          "200": jsonResponse("Updated sharing settings.", "ProjectSharing"),
+          "200": jsonResponse("Updated sharing settings.", "DocumentSharing"),
           ...errors(400, 401, 403, 404, 408, 409, 413, 415, 500, 503),
         },
       },
     },
     "/api/shared/{token}": {
       get: {
-        operationId: "getSharedProject",
-        summary: "Read a publicly shared project",
+        operationId: "getSharedDocument",
+        summary: "Read one publicly shared planning item",
         description:
-          "Anyone holding an active public link can read this limited project projection. No session, API key or membership is created. Responses are not cached or indexed.",
+          "An active token identifies exactly one planning item and returns its current original files and sketch. There is no public project listing or document-id selector. Invalid and revoked tokens return NOT_FOUND. No session, API key or membership is created. Instructions, history, discussion, people and GitHub references are omitted. Original HTML is untrusted and must be displayed in an isolated sandbox. Responses are not cached or indexed.",
         tags: ["Public sharing"],
         security: [],
         parameters: [publicShareToken],
         responses: {
           "200": jsonResponse(
-            "Shared project name and description.",
-            "SharedProject",
-          ),
-          ...errors(404, 500),
-        },
-      },
-    },
-    "/api/shared/{token}/documents": {
-      get: {
-        operationId: "listSharedDocuments",
-        summary: "List tasks in a shared project",
-        description:
-          "Returns up to 100 current tasks from this project, including all statuses. File metadata only. Each request rechecks the active link. Pass nextCursor unchanged to continue; a null cursor ends the list.",
-        tags: ["Public sharing"],
-        security: [],
-        parameters: [
-          publicShareToken,
-          {
-            name: "cursor",
-            in: "query",
-            description: "Opaque cursor returned by this list.",
-            schema: { type: "string", maxLength: 200 },
-          },
-        ],
-        responses: {
-          "200": jsonResponse(
-            "Current public task summaries.",
-            "SharedDocumentsResponse",
-          ),
-          ...errors(400, 404, 500),
-        },
-      },
-    },
-    "/api/shared/{token}/documents/{id}": {
-      get: {
-        operationId: "getSharedDocument",
-        summary: "Read a task in a shared project",
-        description:
-          "Returns current files and diagram only for a task belonging to the link's project. Other-project ids and revoked links both return NOT_FOUND. No instructions, history, discussion, author names, membership or GitHub references. Original HTML remains untrusted and must be displayed in an isolated sandbox.",
-        tags: ["Public sharing"],
-        security: [],
-        parameters: [publicShareToken, id],
-        responses: {
-          "200": jsonResponse(
-            "Current public task and original files.",
+            "Current public planning item, files and sketch.",
             "SharedDocument",
           ),
-          ...errors(400, 404, 500),
+          ...errors(404, 500),
         },
       },
     },

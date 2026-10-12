@@ -21,7 +21,8 @@ import {
 } from "../src/server/auth";
 import {
   getSharedDocument,
-  listSharedDocuments,
+  getDocumentSharing,
+  updateDocumentSharing,
   getDocumentCanvas,
   updateDocumentCanvas,
   createDocument,
@@ -68,9 +69,6 @@ import {
   updateTeam,
 } from "../src/server/teams";
 import {
-  getSharedProject,
-  getProjectSharing,
-  updateProjectSharing,
   createProject,
   getProject,
   listProjects,
@@ -574,21 +572,8 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     } while (cursor);
     expect(ids).toHaveLength(205);
     expect(new Set(ids).size).toBe(205);
-    const shared = await updateProjectSharing(principal, project.id, {
-      action: "enable",
-      expectedVersion: 1,
-    });
-    const token = shared.path!.split("/").at(-1)!;
-    const publicIds: string[] = [];
-    cursor = undefined;
-    do {
-      const page = await listSharedDocuments(token, cursor);
-      publicIds.push(...page.map((task) => task.id));
-      cursor = nextDocumentCursor(page) ?? undefined;
-    } while (cursor);
-    expect(publicIds).toEqual(ids);
   });
-  it("migrates existing accounts, keys and placement without changing revisioned content or comments", async () => {
+  it("migrates existing placement and revokes project links without changing accounts, files, sketches or history", async () => {
     const previousMigrations = await Promise.all(
       [
         "001_initial.sql",
@@ -639,6 +624,37 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
         "INSERT INTO api_tokens(id,user_id,name,scope,secret_hash,token_suffix) VALUES($1,$2,'Original key','write','fixture-hash','abcd')",
         [tokenId, userIds[0]],
       );
+      const originalSketch = {
+        schemaVersion: 1,
+        title: "Original sketch",
+        shapes: [
+          {
+            id: "original",
+            type: "rectangle",
+            text: "Preserved sketch",
+            x: 0,
+            y: 0,
+            width: 240,
+            height: 120,
+            color: "blue",
+          },
+        ],
+      };
+      await client.query(
+        "UPDATE document_revisions SET files=$1::jsonb,canvas=$2::jsonb",
+        [
+          JSON.stringify([
+            ...content.files,
+            {
+              id: crypto.randomUUID(),
+              name: "notes.md",
+              format: "markdown",
+              content: "# Original notes",
+            },
+          ]),
+          JSON.stringify(originalSketch),
+        ],
+      );
       const revisions = (await client.query("SELECT * FROM document_revisions"))
         .rows;
       const comments = (await client.query("SELECT * FROM comments")).rows;
@@ -681,44 +697,116 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
           (row) => row.role,
         ),
       ).toEqual(["global_admin", "user", "user"]);
+      await client.query(
+        await readFile(
+          resolve(process.cwd(), "migrations/009_public_project_sharing.sql"),
+          "utf8",
+        ),
+      );
+      const oldProjectToken = "p".repeat(43);
+      await client.query(
+        "UPDATE projects SET public_share_token=$1,public_share_version=4 WHERE id=$2",
+        [oldProjectToken, initialProjectId],
+      );
+      const documentRows = (await client.query("SELECT * FROM documents")).rows;
+      const projectRows = (
+        await client.query(
+          "SELECT id,team_id,name,description,version,created_at FROM projects",
+        )
+      ).rows;
+      await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+      await client.query(
+        await readFile(
+          resolve(process.cwd(), "migrations/010_public_document_sharing.sql"),
+          "utf8",
+        ),
+      );
+      expect((await client.query("SELECT * FROM documents")).rows).toEqual(
+        documentRows.map((row) => ({
+          ...row,
+          public_share_token: null,
+          public_share_version: 1,
+        })),
+      );
+      expect(
+        (
+          await client.query(
+            "SELECT id,team_id,name,description,version,created_at FROM projects",
+          )
+        ).rows,
+      ).toEqual(projectRows);
+      expect(
+        (await client.query("SELECT * FROM document_revisions")).rows,
+      ).toEqual(revisions);
+      expect((await client.query("SELECT * FROM comments")).rows).toEqual(
+        comments,
+      );
+      expect(
+        (
+          await client.query(
+            "SELECT id FROM documents WHERE public_share_token=$1",
+            [oldProjectToken],
+          )
+        ).rows,
+      ).toEqual([]);
+      expect(
+        (
+          await client.query(
+            "SELECT column_name FROM information_schema.columns WHERE table_schema=$1 AND table_name='projects' AND column_name IN ('public_share_token','public_share_version')",
+            [schema],
+          )
+        ).rows,
+      ).toEqual([]);
       await client.query("SET CONSTRAINTS ALL IMMEDIATE");
       await client.query(`SET LOCAL search_path TO public`);
       await client.query(`DROP SCHEMA ${schema} CASCADE`);
     });
   });
-  it("shares only current project content, includes future tasks and keeps internal context private", async () => {
+  it("shares only one planning item with all its current files and sketch, keeping siblings and internal context private", async () => {
     const project = await createProject(principal, {
       teamId: initialTeamId,
       name: "External review",
-      description: "Project description",
-    });
-    expect(await getProjectSharing(principal, project.id)).toEqual({
-      path: null,
-      version: 1,
+      description: "Private project description",
     });
     const first = await createDocument(principal, {
       ...content,
       projectId: project.id,
       instructions: "Internal AI guidance",
       changeSummary: "Private author notes",
+      files: [
+        ...content.files,
+        {
+          id: crypto.randomUUID(),
+          name: "notes.md",
+          format: "markdown",
+          content: "# Review notes",
+        },
+      ],
+    });
+    const sibling = await createDocument(principal, {
+      ...content,
+      projectId: project.id,
+      title: "Private sibling",
+    });
+    expect(await getDocumentSharing(principal, first.id)).toEqual({
+      path: null,
+      version: 1,
     });
     await addComment(principal, first.id, { body: "Private discussion" });
-    const state = await updateProjectSharing(principal, project.id, {
+    const state = await updateDocumentSharing(principal, first.id, {
       action: "enable",
       expectedVersion: 1,
     });
     const token = state.path!.split("/").at(-1)!;
     expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect(JSON.stringify(await listProjects(principal))).not.toContain(token);
+    expect(await getDocumentSharing(principal, first.id)).toEqual(state);
+    expect(await getDocument(principal, first.id)).toEqual(first);
+    expect(await listRevisions(principal, first.id)).toHaveLength(1);
     expect(
-      JSON.stringify(await getProject(principal, project.id)),
+      JSON.stringify(await listDocuments(principal, { projectId: project.id })),
     ).not.toContain(token);
-    expect(await getProjectSharing(principal, project.id)).toEqual(state);
-    expect(await getSharedProject(token)).toEqual({
-      name: project.name,
-      description: project.description,
-    });
-    const shared = await getSharedDocument(token, first.id);
+    expect(JSON.stringify(await listProjects(principal))).not.toContain(token);
+    const shared = await getSharedDocument(token);
     expect(Object.keys(shared).sort()).toEqual(
       [
         "id",
@@ -730,41 +818,76 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
         "updatedAt",
       ].sort(),
     );
+    expect(shared.id).toBe(first.id);
     expect(shared.files).toEqual(first.files);
-    expect(JSON.stringify(shared)).not.toContain("Internal AI guidance");
-    const summary = (await listSharedDocuments(token))[0];
-    expect(summary.id).toBe(first.id);
-    expect(summary.files[0]).not.toHaveProperty("content");
-    expect(summary).not.toHaveProperty("authorName");
+    for (const text of [
+      "Internal AI guidance",
+      "Private author notes",
+      "Private discussion",
+      sibling.id,
+      "Private project description",
+    ])
+      expect(JSON.stringify(shared)).not.toContain(text);
     const drawn = await updateDocumentCanvas(principal, first.id, {
       expectedVersion: first.version,
-      changeSummary: "Add diagram",
-      operations: [{ action: "rename", title: "Public diagram" }],
+      changeSummary: "Add sketch",
+      operations: [
+        {
+          action: "upsert",
+          shape: {
+            id: "review",
+            type: "rectangle",
+            text: "Review",
+            x: 0,
+            y: 0,
+            width: 240,
+            height: 120,
+            color: "blue",
+          },
+        },
+      ],
     });
-    expect((await getSharedDocument(token, first.id)).canvas).toEqual(
-      drawn.canvas,
-    );
-    const second = await createDocument(principal, {
+    expect((await getSharedDocument(token)).canvas).toEqual(drawn.canvas);
+    const updated = await updateDocument(principal, first.id, {
+      ...content,
+      expectedVersion: drawn.version,
+      files: [
+        ...first.files,
+        {
+          id: crypto.randomUUID(),
+          name: "design.html",
+          format: "html",
+          content: "<h1>New design</h1>",
+        },
+      ],
+    });
+    expect((await getSharedDocument(token)).files).toEqual(updated.files);
+    const future = await createDocument(principal, {
       ...content,
       projectId: project.id,
-      title: "Future task",
+      title: "Future private planning",
       status: "archived",
     });
-    expect((await listSharedDocuments(token)).map((item) => item.id)).toContain(
-      second.id,
-    );
+    for (const other of [sibling, future]) {
+      expect(await getDocumentSharing(principal, other.id)).toEqual({
+        path: null,
+        version: 1,
+      });
+      await expect(getSharedDocument(other.id)).rejects.toMatchObject({
+        status: 404,
+      });
+    }
     expect((await getProject(principal, project.id)).version).toBe(1);
-    const { GET } =
-      await import("../src/app/api/shared/[token]/documents/[id]/route");
+    const { GET } = await import("../src/app/api/shared/[token]/route");
     const response = await GET(
-      new Request("http://localhost/api/shared/test"),
-      { params: Promise.resolve({ token, id: first.id }) },
+      new Request(
+        `http://localhost/api/shared/${token}?id=${sibling.id}&projectId=${project.id}`,
+      ),
+      { params: Promise.resolve({ token }) },
     );
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.json()).toEqual(
-      await getSharedDocument(token, first.id),
-    );
+    expect(await response.json()).toEqual(await getSharedDocument(token));
     await expect(
       requirePrincipal(
         new Request("http://localhost/api/documents", {
@@ -773,87 +896,87 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
       ),
     ).rejects.toMatchObject({ status: 401 });
   });
-  it("keeps public links project-bound and invalidates old links on rotation, disable and re-enable", async () => {
-    const a = await createProject(principal, {
-      teamId: initialTeamId,
-      name: "Share A",
-      description: "",
-    });
-    const b = await createProject(principal, {
-      teamId: initialTeamId,
-      name: "Share B",
-      description: "",
-    });
-    const task = await createDocument(principal, {
+  it("keeps links independent per planning item and revokes old tokens on rotation, disable and re-enable", async () => {
+    const first = await createDocument(principal, content);
+    const second = await createDocument(principal, {
       ...content,
-      projectId: b.id,
+      title: "Second private planning",
     });
-    const enabled = await updateProjectSharing(principal, a.id, {
+    await expect(
+      updateDocumentSharing(principal, first.id, {
+        action: "rotate",
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({ code: "SHARING_DISABLED" });
+    const enabled = await updateDocumentSharing(principal, first.id, {
+      action: "enable",
+      expectedVersion: 1,
+    });
+    const secondState = await updateDocumentSharing(principal, second.id, {
       action: "enable",
       expectedVersion: 1,
     });
     const token = enabled.path!.split("/").at(-1)!;
-    expect(await listSharedDocuments(token)).toEqual([]);
-    await expect(getSharedDocument(token, task.id)).rejects.toMatchObject({
-      status: 404,
-    });
-    await expect(getSharedProject("a".repeat(43))).rejects.toMatchObject({
+    const secondToken = secondState.path!.split("/").at(-1)!;
+    expect(secondToken).not.toBe(token);
+    expect((await getSharedDocument(token)).id).toBe(first.id);
+    expect((await getSharedDocument(secondToken)).id).toBe(second.id);
+    await expect(getSharedDocument("a".repeat(43))).rejects.toMatchObject({
       status: 404,
     });
     expect(
-      await updateProjectSharing(principal, a.id, {
+      await updateDocumentSharing(principal, first.id, {
         action: "enable",
         expectedVersion: enabled.version,
       }),
     ).toEqual(enabled);
-    const rotated = await updateProjectSharing(principal, a.id, {
+    const rotated = await updateDocumentSharing(principal, first.id, {
       action: "rotate",
       expectedVersion: enabled.version,
     });
     const nextToken = rotated.path!.split("/").at(-1)!;
     expect(nextToken).not.toBe(token);
-    for (const read of [
-      () => getSharedProject(token),
-      () => listSharedDocuments(token),
-      () => getSharedDocument(token, task.id),
-    ])
-      await expect(read()).rejects.toMatchObject({
-        status: 404,
-        code: "NOT_FOUND",
-      });
-    const disabled = await updateProjectSharing(principal, a.id, {
+    await expect(getSharedDocument(token)).rejects.toMatchObject({
+      status: 404,
+      code: "NOT_FOUND",
+    });
+    const disabled = await updateDocumentSharing(principal, first.id, {
       action: "disable",
       expectedVersion: rotated.version,
     });
     expect(disabled.path).toBeNull();
-    await expect(listSharedDocuments(nextToken)).rejects.toMatchObject({
+    await expect(getSharedDocument(nextToken)).rejects.toMatchObject({
       status: 404,
     });
-    const restored = await updateProjectSharing(principal, a.id, {
+    expect(
+      await updateDocumentSharing(principal, first.id, {
+        action: "disable",
+        expectedVersion: disabled.version,
+      }),
+    ).toEqual(disabled);
+    const restored = await updateDocumentSharing(principal, first.id, {
       action: "enable",
       expectedVersion: disabled.version,
     });
     expect(restored.path).not.toBe(enabled.path);
     expect(restored.path).not.toBe(rotated.path);
-    await expect(
-      listSharedDocuments(restored.path!.split("/").at(-1)!, "x".repeat(201)),
-    ).rejects.toMatchObject({ status: 400 });
+    expect(
+      (await getSharedDocument(restored.path!.split("/").at(-1)!)).id,
+    ).toBe(first.id);
+    expect((await getSharedDocument(secondToken)).id).toBe(second.id);
+    expect(await getDocumentSharing(principal, second.id)).toEqual(secondState);
   });
   it("restricts sharing administration to current owners in browser sessions", async () => {
     const owner = await readyMember(principal, "owner");
     const editor = await readyMember(principal, "editor");
     const viewer = await readyMember(principal, "viewer");
-    const project = await createProject(principal, {
-      teamId: initialTeamId,
-      name: "Owner controlled",
-      description: "",
-    });
+    const plan = await createDocument(principal, content);
     for (const identity of [editor, viewer]) {
+      await expect(getDocumentSharing(identity, plan.id)).rejects.toMatchObject(
+        { status: 403 },
+      );
       await expect(
-        getProjectSharing(identity, project.id),
-      ).rejects.toMatchObject({ status: 403 });
-      await expect(
-        updateProjectSharing(identity, project.id, {
+        updateDocumentSharing(identity, plan.id, {
           action: "enable",
           expectedVersion: 1,
         }),
@@ -870,7 +993,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
       }),
     );
     await expect(
-      updateProjectSharing(tokenPrincipal, project.id, {
+      updateDocumentSharing(tokenPrincipal, plan.id, {
         action: "enable",
         expectedVersion: 1,
       }),
@@ -884,10 +1007,14 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
       name: "Other project",
       description: "",
     });
-    await expect(
-      getProjectSharing(owner, otherProject.id),
-    ).rejects.toMatchObject({ status: 404 });
-    const state = await updateProjectSharing(owner, project.id, {
+    const otherPlan = await createDocument(principal, {
+      ...content,
+      projectId: otherProject.id,
+    });
+    await expect(getDocumentSharing(owner, otherPlan.id)).rejects.toMatchObject(
+      { status: 404 },
+    );
+    const state = await updateDocumentSharing(owner, plan.id, {
       action: "enable",
       expectedVersion: 1,
     });
@@ -896,18 +1023,18 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
       role: "editor",
     });
     await expect(
-      updateProjectSharing(owner, project.id, {
+      updateDocumentSharing(owner, plan.id, {
         action: "disable",
         expectedVersion: state.version,
       }),
     ).rejects.toMatchObject({ status: 403 });
-    const { PUT } = await import("../src/app/api/projects/[id]/sharing/route");
+    const { PUT } = await import("../src/app/api/documents/[id]/sharing/route");
     const loginResult = await login(
       "real-admin@example.test",
       "Changed long password 456",
     );
     const response = await PUT(
-      new Request(`http://localhost/api/projects/${project.id}/sharing`, {
+      new Request(`http://localhost/api/documents/${plan.id}/sharing`, {
         method: "PUT",
         headers: {
           cookie: `planroom_session=${loginResult.secret}`,
@@ -919,13 +1046,13 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
           expectedVersion: state.version,
         }),
       }),
-      { params: Promise.resolve({ id: project.id }) },
+      { params: Promise.resolve({ id: plan.id }) },
     );
     expect(response.status).toBe(403);
     expect(await response.json()).toMatchObject({
       error: { code: "INVALID_ORIGIN" },
     });
-    expect(await getProjectSharing(principal, project.id)).toEqual(state);
+    expect(await getDocumentSharing(principal, plan.id)).toEqual(state);
     await logout(
       new Request("http://localhost/api/auth/logout", {
         headers: { cookie: `planroom_session=${loginResult.secret}` },
@@ -934,11 +1061,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
   });
   it("rechecks sharing ownership after waiting for team revocation and rejects ended sessions", async () => {
     const owner = await readyMember(principal, "owner");
-    const project = await createProject(owner, {
-      teamId: initialTeamId,
-      name: "Sharing demotion",
-      description: "",
-    });
+    const plan = await createDocument(owner, content);
     const blocker = await db.connect();
     let outcome: Promise<PromiseSettledResult<unknown>[]> | undefined;
     try {
@@ -946,7 +1069,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
       await blocker.query("SELECT id FROM teams WHERE id=$1 FOR UPDATE", [
         initialTeamId,
       ]);
-      const pending = updateProjectSharing(owner, project.id, {
+      const pending = updateDocumentSharing(owner, plan.id, {
         action: "enable",
         expectedVersion: 1,
       });
@@ -963,7 +1086,7 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
       blocker.release();
       if (outcome) await outcome;
     }
-    expect(await getProjectSharing(principal, project.id)).toEqual({
+    expect(await getDocumentSharing(principal, plan.id)).toEqual({
       path: null,
       version: 1,
     });
@@ -978,24 +1101,20 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
       }),
     );
     await expect(
-      updateProjectSharing(cached, project.id, {
+      updateDocumentSharing(cached, plan.id, {
         action: "enable",
         expectedVersion: 1,
       }),
     ).rejects.toMatchObject({ status: 401 });
   });
   it("serializes competing share decisions without overwriting the winning link", async () => {
-    const project = await createProject(principal, {
-      teamId: initialTeamId,
-      name: "Sharing race",
-      description: "",
-    });
+    const plan = await createDocument(principal, content);
     const results = await Promise.allSettled([
-      updateProjectSharing(principal, project.id, {
+      updateDocumentSharing(principal, plan.id, {
         action: "enable",
         expectedVersion: 1,
       }),
-      updateProjectSharing(principal, project.id, {
+      updateDocumentSharing(principal, plan.id, {
         action: "enable",
         expectedVersion: 1,
       }),
@@ -1007,14 +1126,14 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     if (!rejected || rejected.status !== "rejected")
       throw new Error("Expected conflict");
     expect(rejected.reason).toMatchObject({ code: "SHARING_CONFLICT" });
-    const current = await getProjectSharing(principal, project.id);
+    const current = await getDocumentSharing(principal, plan.id);
     await expect(
-      updateProjectSharing(principal, project.id, {
+      updateDocumentSharing(principal, plan.id, {
         action: "disable",
         expectedVersion: 1,
       }),
     ).rejects.toMatchObject({ code: "SHARING_CONFLICT" });
-    expect(await getProjectSharing(principal, project.id)).toEqual(current);
+    expect(await getDocumentSharing(principal, plan.id)).toEqual(current);
   });
   it("seeds exactly once after the start account has been renamed, even without its password", async () => {
     const before = (
