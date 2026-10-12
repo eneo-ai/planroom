@@ -1,6 +1,6 @@
 # Deployment and recovery
 
-Planroom is early-stage, single-workspace software for a trusted team. Use individual accounts and HTTPS for a shared installation. Account disabling and password-recovery workflows are not yet implemented. Keep recoverable database backups and review [SECURITY.md](../SECURITY.md) before introducing sensitive data.
+Planroom is early-stage, single-workspace software for a trusted team. Use individual accounts and HTTPS for a shared installation. Administrators can generate one-time passwords; account disabling and email-based recovery are not implemented. Keep recoverable database backups and review [SECURITY.md](../SECURITY.md) before introducing sensitive data.
 
 ## Configuration and startup
 
@@ -112,7 +112,24 @@ docker compose exec -T db pg_restore -U planroom -d planroom --clean --if-exists
 docker compose up -d app
 ```
 
-Use the app version associated with the backup, or a later version with applicable migrations. Check health, login, documents and revision history afterwards. Restored sessions and keys reflect the backup time; if credentials may have been compromised, revoke them and rotate relevant credentials before restoring shared access. Planroom currently has no operator-facing account-recovery CLI.
+Use the app version associated with the backup, or a later version with applicable migrations. Check health, login, documents and revision history afterwards. Restored sessions and keys reflect the backup time; if credentials may have been compromised, revoke them and rotate relevant credentials before restoring shared access.
+
+## Account recovery
+
+A signed-in global administrator can open **Inställningar → Personer**, select **Återställ lösenord** for another user and confirm the named account. The generated password is displayed once with a copy action. Use **Mitt konto** to change your own password when you still have access.
+
+To recover a user, including a locked-out administrator, open the **app container** terminal in Dokploy (not the PostgreSQL container) and run:
+
+```sh
+cd /app
+npm run user:reset-password -- user@example.com
+```
+
+From the Compose host the equivalent is `docker compose exec app npm run user:reset-password -- user@example.com`. The deployed app must include migration 011 and the reset script; normal startup applies migrations. No database wipe or seed rerun is needed. The command selects the exact normalized email and fails without changes if the user does not exist. Do not write plaintext passwords directly to `users.password_hash`.
+
+The command prints the new password only after the transaction commits. Hand it to the intended user through your established private channel; do not copy terminal output into logs, issues or source control. It works for one login within 24 hours, then the user must enter that temporary password as their current password and choose a new one. All previous sessions and API keys are revoked; names, email, roles, team membership and content are preserved. Existing login limits remain in effect: after five failed attempts, wait until the ten-minute lock expires. A lost response, expired password or lost setup session requires another reset. Re-running the command invalidates the previous generated password and setup session.
+
+Migration 011 adds nullable expiry/consumption fields and leaves existing credentials unchanged. Keep a protected backup before deployment. Older images ignore these fields and would accept a consumed or expired reset password: prefer a forward fix, or a matched image/database backup with an explicit credential recovery plan.
 
 ## Upgrade and rollback
 

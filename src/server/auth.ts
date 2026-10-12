@@ -1,6 +1,13 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
-import type { ApiToken, Role, TeamRole, User } from "../contracts";
+import {
+  emailSchema,
+  type ApiToken,
+  type PasswordReset,
+  type Role,
+  type TeamRole,
+  type User,
+} from "../contracts";
 import { db, transaction } from "./db";
 import { AppError, isUniqueViolation, notFound } from "./errors";
 import { hashPassword, verifyLoginPassword, verifyPassword } from "./passwords";
@@ -17,6 +24,8 @@ export interface UserRow {
   role: Role;
   must_change_password: boolean;
   password_hash: string;
+  password_reset_expires_at: Date | null;
+  password_reset_used_at: Date | null;
 }
 interface TokenRow {
   id: string;
@@ -90,7 +99,7 @@ export function assertReady(principal: Principal): void {
     throw new AppError(
       403,
       "ACCOUNT_SETUP_REQUIRED",
-      "Byt startkontots uppgifter innan du fortsätter.",
+      "Byt lösenord innan du fortsätter.",
     );
 }
 export function assertWrite(principal: Principal): void {
@@ -326,7 +335,12 @@ export async function login(
         password,
         row?.password_hash ?? null,
       );
-      if (!row || !verification.matches) {
+      const resetUnavailable =
+        row &&
+        row.password_reset_expires_at !== null &&
+        (row.password_reset_used_at !== null ||
+          row.password_reset_expires_at.getTime() <= Date.now());
+      if (!row || !verification.matches || resetUnavailable) {
         await client.query(
           `INSERT INTO login_attempts(subject_hash,attempts,window_start) VALUES($1,$2,clock_timestamp())
          ON CONFLICT(subject_hash) DO UPDATE SET attempts=$2,window_start=CASE WHEN $2=1 OR $2=5 THEN clock_timestamp() ELSE login_attempts.window_start END`,
@@ -345,6 +359,11 @@ export async function login(
           verification.upgradedHash,
         ]);
       }
+      if (row.password_reset_expires_at !== null)
+        await client.query(
+          "UPDATE users SET password_reset_used_at=clock_timestamp() WHERE id=$1",
+          [row.id],
+        );
       await client.query("DELETE FROM login_attempts WHERE subject_hash=$1", [
         secretHash(email),
       ]);
@@ -488,7 +507,7 @@ export async function replaceAccount(
           "Byt startkontots e-postadress till din riktiga adress.",
         );
       const updated = await client.query<UserRow>(
-        "UPDATE users SET name=$2,email=$3,password_hash=$4,must_change_password=false WHERE id=$1 RETURNING *",
+        "UPDATE users SET name=$2,email=$3,password_hash=$4,must_change_password=false,password_reset_expires_at=NULL,password_reset_used_at=NULL WHERE id=$1 RETURNING *",
         [row.id, input.name, input.email, passwordHash],
       );
       await client.query("DELETE FROM sessions WHERE user_id=$1", [row.id]);
@@ -599,4 +618,70 @@ export async function createUser(
       throw new AppError(409, "EMAIL_IN_USE", "E-postadressen används redan.");
     throw error;
   }
+}
+
+/** Caller holds the target user lock. This is the only reset persistence path. */
+async function issueTemporaryPassword(
+  client: PoolClient,
+  id: string,
+): Promise<PasswordReset> {
+  const temporaryPassword = randomBytes(18).toString("base64url");
+  const passwordHash = await hashPassword(temporaryPassword);
+  const row = (
+    await client.query<UserRow>(
+      "UPDATE users SET password_hash=$2,must_change_password=true,password_reset_expires_at=clock_timestamp()+interval '24 hours',password_reset_used_at=NULL WHERE id=$1 RETURNING *",
+      [id, passwordHash],
+    )
+  ).rows[0];
+  if (!row?.password_reset_expires_at) return notFound();
+  await client.query("DELETE FROM sessions WHERE user_id=$1", [id]);
+  await client.query("DELETE FROM api_tokens WHERE user_id=$1", [id]);
+  return {
+    user: userFromRow(row),
+    temporaryPassword,
+    expiresAt: row.password_reset_expires_at.toISOString(),
+  };
+}
+
+export async function resetUserPassword(
+  principal: Principal,
+  id: string,
+): Promise<PasswordReset> {
+  assertAdmin(principal);
+  if (id.toLowerCase() === principal.user.id.toLowerCase())
+    throw new AppError(
+      403,
+      "SELF_RESET_NOT_ALLOWED",
+      "Ändra ditt eget lösenord under Mitt konto.",
+    );
+  return transaction(async (client) => {
+    // Two administrators resetting one another must take both user locks in
+    // the same order. Live authorization is checked after waiting for them.
+    const targets = await client.query<{ id: string }>(
+      "SELECT id FROM users WHERE id=ANY($1::uuid[]) ORDER BY id FOR NO KEY UPDATE",
+      [[principal.user.id, id]],
+    );
+    const current = await lockSessionUser(client, principal);
+    assertAdmin({ ...principal, user: userFromRow(current) });
+    if (!targets.rows.some((row) => row.id === id.toLowerCase()))
+      return notFound();
+    return issueTemporaryPassword(client, id);
+  });
+}
+
+/** Explicit operator entry point: only the CLI, never an HTTP/MCP adapter. */
+export async function resetUserPasswordAsOperator(
+  email: string,
+): Promise<PasswordReset> {
+  const normalized = emailSchema.parse(email);
+  return transaction(async (client) => {
+    const row = (
+      await client.query<{ id: string }>(
+        "SELECT id FROM users WHERE email=$1 FOR NO KEY UPDATE",
+        [normalized],
+      )
+    ).rows[0];
+    if (!row) return notFound();
+    return issueTemporaryPassword(client, row.id);
+  });
 }

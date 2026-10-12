@@ -313,6 +313,12 @@ export const createUserSchema = z.object({
   password: passwordSchema,
   role: roleSchema,
 });
+export const passwordResetResponseSchema = z.object({
+  user: userSchema,
+  temporaryPassword: z.string().regex(/^[A-Za-z0-9_-]{24}$/),
+  expiresAt: timestampSchema,
+});
+export type PasswordReset = z.infer<typeof passwordResetResponseSchema>;
 export const documentContentSchema = z.strictObject({
   title: z.string().trim().min(1).max(200),
   description: z.string().trim().max(2000).default(""),

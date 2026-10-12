@@ -29,6 +29,9 @@ POST /api/tokens body {name,teamId,scope:'read'|'write'} -> {token:string,record
 DELETE /api/tokens/:id -> {ok:true}
 GET /api/admin/users -> {users:User[]}
 POST /api/admin/users body {name,email,password,role} -> {user}; new users must change password.
+POST /api/admin/users/:id/reset-password -> {user,temporaryPassword,expiresAt}; no body. Requires an active globaladmin browser session, completed setup and same-origin Origin. Self-reset returns 403 SELF_RESET_NOT_ALLOWED; use /api/auth/setup to change your own password. Missing users return 404. The response is no-store and shows a random 24-character password only once. It replaces the password, sets mustChangePassword=true and atomically revokes all target sessions and API keys. It expires in 24 hours and permits exactly one login, including under concurrent attempts. That session can only complete account setup or log out until the password is changed. Setup verifies the temporary password again, clears reset metadata and rotates the session. Lost responses or setup sessions require a fresh reset; clients must not retry automatically. Existing login budgets and lockouts still apply. Name, email, roles, memberships and planning content are preserved.
+
+The operator CLI `npm run user:reset-password -- user@example.com` uses the same reset owner in auth.ts, selecting one exact normalized email. Run it inside the app container after migrations; it needs the app's DATABASE_URL. It can recover an administrator account without a browser session. See [deployment instructions](DEPLOYMENT.md#account-recovery).
 POST /api/mcp official SDK stateless Streamable HTTP; bearer token required, browser cookie not accepted.
 GET /api/health -> {status:'ok'} if DB reachable, 503 otherwise.
 

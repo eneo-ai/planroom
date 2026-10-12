@@ -14,11 +14,11 @@ export default function SetupPage() {
         <span>Planroom</span>
       </div>
       <Card padding={8} className="setup-card">
-        <p className="eyebrow">EN BRA START</p>
-        <h1>Gör kontot till ditt</h1>
+        <p className="eyebrow">LÖSENORDSBYTE KRÄVS</p>
+        <h1>Välj ditt eget lösenord</h1>
         <p className="muted">
-          Byt startuppgifterna mot ditt namn, din e-postadress och ett nytt
-          lösenord innan du öppnar arbetsytan.
+          Kontrollera ditt namn och din e-postadress och välj ett nytt lösenord
+          innan du öppnar arbetsytan.
         </p>
         <AccountForm onSaved={() => router.replace("/")} />
       </Card>

@@ -96,6 +96,11 @@ export function AccountForm({ onSaved }: { onSaved?: () => void }) {
         onChange={setCurrentPassword}
         isRequired
         autoComplete="current-password"
+        description={
+          user?.mustChangePassword
+            ? "Ange lösenordet du använde för att logga in."
+            : undefined
+        }
         size="lg"
         width="100%"
       />
@@ -121,7 +126,9 @@ export function AccountForm({ onSaved }: { onSaved?: () => void }) {
         width="100%"
       />
       <Button
-        label={user?.mustChangePassword ? "Aktivera mitt konto" : "Spara konto"}
+        label={
+          user?.mustChangePassword ? "Byt lösenord och fortsätt" : "Spara konto"
+        }
         variant="primary"
         type="submit"
         isLoading={busy}

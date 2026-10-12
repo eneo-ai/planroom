@@ -27,6 +27,7 @@ import {
   createdTokenResponseSchema,
   createTokenSchema,
   createUserSchema,
+  passwordResetResponseSchema,
   documentContentSchema,
   documentDetailSchema,
   documentGitHubLinksSchema,
@@ -160,6 +161,7 @@ const responseSchemas = {
   ApiToken: apiTokenSchema,
   ApiErrorBody: apiErrorBodySchema,
   UserResponse: userResponseSchema,
+  PasswordResetResponse: passwordResetResponseSchema,
   SessionResponse: sessionResponseSchema,
   DocumentsResponse: documentsResponseSchema,
   RevisionsResponse: revisionsResponseSchema,
@@ -498,7 +500,7 @@ export const openApiDocument: OpenApiDocument = {
         operationId: "login",
         summary: "Sign in and create a session",
         description:
-          "Valid credentials create a seven-day HttpOnly session cookie. Initial accounts may sign in but must complete setup before workspace access. Successful login clears the email's failed-attempt counter.",
+          "Valid credentials create a seven-day HttpOnly session cookie. Initial and reset accounts must complete setup before workspace access. Generated reset passwords expire after 24 hours and are consumed by one successful login; replay or expiry returns INVALID_CREDENTIALS. Successful login clears the email's failed-attempt counter.",
         tags: ["Authentication"],
         security: security.public,
         parameters: [origin],
@@ -560,7 +562,7 @@ export const openApiDocument: OpenApiDocument = {
         operationId: "replaceAccount",
         summary: "Replace starter credentials or update your account",
         description:
-          "Requires an active browser session and the current password; bearer keys cannot perform account changes. Allowed before mandatory setup is complete and for every role. The password must change; admin@planroom.local must be replaced with a real email during setup. Rotates all sessions and revokes all API keys atomically, then returns a new session cookie.",
+          "Requires an active browser session and the current password; bearer keys cannot perform account changes. Allowed before mandatory setup is complete and for every role. After a one-time login, enter the generated password as currentPassword. The password must change; admin@planroom.local must be replaced with a real email during setup. Clears reset metadata, rotates all sessions and revokes all API keys atomically, then returns a new session cookie.",
         tags: ["Authentication"],
         security: security.session,
         parameters: [origin],
@@ -1098,6 +1100,24 @@ export const openApiDocument: OpenApiDocument = {
             "OkResponse",
           ),
           ...errors(400, 401, 403, 500, 503),
+        },
+      },
+    },
+    "/api/admin/users/{id}/reset-password": {
+      post: {
+        operationId: "resetUserPassword",
+        summary: "Generate a one-time password for another user",
+        description:
+          "Requires an active globaladmin browser session with completed setup and same-origin Origin. Replaces the target user's password and revokes all their sessions and API keys atomically. The generated secret is returned only in this response, expires after 24 hours and permits one login to choose a new password through account setup. It cannot be retrieved later. An uncertain response requires a new explicitly confirmed reset. Self-reset is forbidden; use account setup for your own password. Existing login rate limits still apply.",
+        tags: ["Administration"],
+        security: security.session,
+        parameters: [{ ...id, description: "Target user UUID." }, origin],
+        responses: {
+          "200": jsonResponse(
+            "One-time password and expiry; user has mustChangePassword=true. Cache-Control: no-store.",
+            "PasswordResetResponse",
+          ),
+          ...errors(400, 401, 403, 404, 429, 500, 503),
         },
       },
     },
