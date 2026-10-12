@@ -48,7 +48,7 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
-    "@astryxdesign/cli": "0.6.3",
+    "@astryxdesign/cli": "0.6.5",
     "@types/node": "^22.0.0",
     "@types/pg": "^8.15.0",
     "@types/react": "^19.0.0",
