@@ -35,7 +35,7 @@
     "@astryxdesign/core": "0.6.3",
     "@astryxdesign/theme-neutral": "0.6.3",
     "@excalidraw/excalidraw": "0.18.1",
-    "@modelcontextprotocol/sdk": "1.31.0",
+    "@modelcontextprotocol/sdk": "1.32.0",
     "@scalar/api-reference-react": "0.9.76",
     "@stylexjs/stylex": "0.19.1",
     "lucide-react": "^0.577.0",
