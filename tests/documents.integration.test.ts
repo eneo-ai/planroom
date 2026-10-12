@@ -647,6 +647,9 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
           "SELECT expires_at,secret_hash,token_suffix FROM api_tokens",
         )
       ).rows[0];
+      // Legacy fixtures were inserted in this transaction; flush deferred
+      // FK events to model a committed pre-upgrade database before ALTER TABLE.
+      await client.query("SET CONSTRAINTS ALL IMMEDIATE");
       await client.query(migration);
       expect(
         (await client.query("SELECT * FROM document_revisions")).rows,
@@ -1014,11 +1017,23 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     expect(await getProjectSharing(principal, project.id)).toEqual(current);
   });
   it("seeds exactly once after the start account has been renamed, even without its password", async () => {
+    const before = (
+      await db.query<{ id: string; email: string }>(
+        "SELECT id,email FROM users ORDER BY id",
+      )
+    ).rows;
+    expect(before).toContainEqual({
+      id: principal.user.id,
+      email: "real-admin@example.test",
+    });
     delete process.env.SEED_ADMIN_PASSWORD;
     await Promise.all([seedBootstrap(), seedBootstrap()]);
-    const users = (await db.query<{ email: string }>("SELECT email FROM users"))
-      .rows;
-    expect(users).toEqual([{ email: "real-admin@example.test" }]);
+    const after = (
+      await db.query<{ id: string; email: string }>(
+        "SELECT id,email FROM users ORDER BY id",
+      )
+    ).rows;
+    expect(after).toEqual(before);
   });
   it("upgrades a legacy hash during successful login without changing the password or revoking existing credentials", async () => {
     const email = "legacy-upgrade@example.test";
