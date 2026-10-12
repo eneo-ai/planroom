@@ -19,7 +19,9 @@ Keep diagrams, tables and interactive demos in one document, share a stable link
 
 Developed for shared planning at **Sundsvalls kommun**, Sweden. The repository is maintained under the [eneo-ai](https://github.com/eneo-ai) organization.
 
-**Early-stage software:** suitable for evaluation by a trusted team. This is a single-workspace application with a Swedish interface, not a finished public document-hosting platform. Review the [limitations](#limits-and-security-boundaries) and [deployment guide](docs/DEPLOYMENT.md) before using it with sensitive information.
+**Early-stage software:** suitable for evaluation by a trusted team. It has a Swedish interface with team-scoped projects and optional public read links. Review the [limitations](#limits-and-security-boundaries) and [deployment guide](docs/DEPLOYMENT.md) before using it with sensitive information.
+
+Projects can be shared with external reviewers through **Projekt → Publik delning**. A team owner activates a link; anyone holding it can read the project's current and future tasks, files and diagrams without an account. Internal instructions, discussion, history, people and GitHub references stay private. Owners can replace or disable the link at any time. All projects start private. See the [sharing contract](docs/CONTRACT.md#teams-projects-and-public-sharing) for scope and recovery details.
 
 ## ✨ What it does
 
@@ -28,7 +30,7 @@ Developed for shared planning at **Sundsvalls kommun**, Sweden. The repository i
 - Rejects stale updates so concurrent work cannot silently overwrite newer content.
 - Lets connected AI clients draw and refine native diagrams with Excalidraw; diagrams share content history and support zoom, fullscreen, text alternatives and PNG export.
 - Provides comments, historical previews, restoration and original HTML/Markdown file export.
-- Includes administrator, editor and viewer accounts, plus scoped personal API keys.
+- Includes global administration, owner/editor/viewer team memberships and team-bound personal API keys.
 - Exposes REST with a public OpenAPI reference, and MCP for connected AI clients.
 
 The stack is TypeScript, React/Next.js, PostgreSQL and [Astryx](https://github.com/facebook/astryx) components and design tokens. Astryx owns standard UI controls, navigation and dialogs; custom code composes the product and isolates the HTML preview. This is an explicit project rule in [AGENTS.md](AGENTS.md#ui-ownership-astryx). REST and MCP share one document owner rather than separate persistence implementations.
@@ -48,7 +50,7 @@ Configuration creates `.env` with separate random database and initial admin pas
 
 Startup builds with a temporary builder limited to 2 GiB and one CPU, runs migrations and first-run seeding, then waits up to 90 seconds for container health. It removes the builder afterwards. The app and database remain running, with their own resource limits. Apply your host's required process supervisor when running this command; repository-specific requirements are recorded in [AGENTS.md](AGENTS.md).
 
-Open **[http://localhost:3210](http://localhost:3210)** and sign in as `admin@planroom.local`. Replace the initial name, email address and password before workspace access. The replacement password must have at least 12 characters. Then create individual colleague accounts in Settings.
+Open **[http://localhost:3210](http://localhost:3210)** and sign in as `admin@planroom.local`. Replace the initial name, email address and password before workspace access. The replacement password must have at least 12 characters. Then create individual colleague accounts in Settings and add them to a team with the appropriate role.
 
 A synthetic planning example is imported once when `SEED_EXAMPLE=true`. Restarts do not overwrite documents or reset the initial credentials. PostgreSQL uses a persistent named volume and has no published port. The app binds to `127.0.0.1` by default.
 
@@ -79,7 +81,7 @@ If someone saved first, reconcile the newer version before retrying. History sta
 | Editor        | Viewer access plus document changes, restoration and comments; create read/write keys |
 | Administrator | Editor access plus create individual user accounts                                    |
 
-All configured users can read all documents in this single workspace. A write key never grants more permission than its owner has.
+Ordinary users see their teams; globaladmin has explicit oversight. Each key belongs to one team and never grants more permission than its owner has there.
 
 ## 🔌 AI and REST access
 
@@ -106,7 +108,7 @@ HTML and Markdown sources are stored without destructive sanitization and displa
 
 Use **Expandera** to view a plan in a fullscreen dialog and close it with the visible button or Escape. Display-mode changes reset temporary demo controls. Script approval applies to the current source and is discarded when that source changes.
 
-The initial scope has no public document links, per-document ACLs, multiple workspaces, SSO, invitations, password-recovery email, account disabling/deletion, live collaborative editor or Mattermost bot. Document lists return the latest 200 matches. Do not use this as a tenant boundary between groups that must not read each other's documents.
+The scope has no per-task ACLs, SSO, invitations, password-recovery email, account disabling/deletion, live collaborative editor or Mattermost bot. Tasks inherit team access through their project. Document lists use 100-result cursor pages. Global administrators and database operators can inspect all teams. Public project links intentionally grant read access to anyone holding them.
 
 Public metadata and health endpoints do not expose workspace content. Shared deployments require HTTPS and a correctly configured `APP_URL`. Revision history is not a backup. See [SECURITY.md](SECURITY.md) for the trust model and vulnerability reporting.
 

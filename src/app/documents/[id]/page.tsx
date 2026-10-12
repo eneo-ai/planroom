@@ -23,6 +23,7 @@ import {
 import {
   documentContentSchema,
   canEditDocumentContent,
+  canWriteTeam,
   type DocumentContent,
   type DocumentDetail,
   type DocumentSummary,
@@ -43,7 +44,6 @@ import { PlanningFileViewer } from "@/components/planning-file-viewer";
 import { DocumentComments } from "@/components/document-comments";
 import { DocumentCanvas } from "@/components/document-canvas";
 import { DocumentHistory } from "@/components/document-history";
-import { useSession } from "@/components/session";
 import {
   useDocumentDraft,
   useDraftProtection,
@@ -62,9 +62,8 @@ function editable(document: DocumentDetail): DocumentContent {
 
 export default function DocumentPage() {
   const { id } = useParams<{ id: string }>();
-  const { user } = useSession();
-  const canWrite = user?.role === "admin" || user?.role === "editor";
   const [document, setDocument] = useState<DocumentDetail | null>(null);
+  const canWrite = document !== null && canWriteTeam(document.role);
   const canEdit =
     canWrite && document !== null && canEditDocumentContent(document.status);
   const [draft, setDraft] = useDocumentDraft(id);
@@ -278,7 +277,10 @@ export default function DocumentPage() {
   ];
   return (
     <div className="page-stack">
-      <Link href="/" isStandalone>
+      <Link
+        href={document ? `/projects/${document.projectId}` : "/"}
+        isStandalone
+      >
         <ArrowLeft size={14} aria-hidden /> Alla planeringar
       </Link>
       <header className="page-heading">

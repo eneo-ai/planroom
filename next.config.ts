@@ -6,6 +6,13 @@ const config: NextConfig = {
   experimental: { cpus: 1 },
   async headers() {
     return [
+      ...["/shared/:path*", "/api/shared/:path*"].map((source) => ({
+        source,
+        headers: [
+          { key: "X-Robots-Tag", value: "noindex, nofollow, noarchive" },
+          { key: "Cache-Control", value: "private, no-store" },
+        ],
+      })),
       {
         source: "/:path*",
         headers: [

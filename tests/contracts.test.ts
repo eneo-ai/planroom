@@ -278,7 +278,8 @@ describe("identity and AI access input contract", () => {
 
   it("permits only the supported user roles", () => {
     expect(
-      createUserSchema.safeParse({ ...replacement, role: "admin" }).success,
+      createUserSchema.safeParse({ ...replacement, role: "global_admin" })
+        .success,
     ).toBe(true);
     expect(
       createUserSchema.safeParse({ ...replacement, role: "superadmin" })
@@ -289,20 +290,30 @@ describe("identity and AI access input contract", () => {
   it("requires an explicit token scope rather than granting write access by default", () => {
     expect(createTokenSchema.safeParse({ name: "AI" }).success).toBe(false);
     expect(
-      createTokenSchema.safeParse({ name: "AI", scope: "admin" }).success,
+      createTokenSchema.safeParse({
+        name: "AI",
+        scope: "admin",
+        teamId: "dca0733b-3325-4efa-9b43-2e71e537b001",
+      }).success,
     ).toBe(false);
     expect(
       createTokenSchema.parse({
         name: "  Research assistant  ",
         scope: "read",
+        teamId: "dca0733b-3325-4efa-9b43-2e71e537b001",
       }),
-    ).toEqual({ name: "Research assistant", scope: "read" });
+    ).toEqual({
+      name: "Research assistant",
+      scope: "read",
+      teamId: "dca0733b-3325-4efa-9b43-2e71e537b001",
+    });
   });
 
   it("returns only a masked key identifier in metadata and permits unavailable historical suffixes", () => {
     const metadata = {
       id: "123e4567-e89b-42d3-a456-426614174000",
       name: "AI client",
+      teamId: "dca0733b-3325-4efa-9b43-2e71e537b001",
       scope: "read",
       createdAt: "2026-09-30T10:00:00.000Z",
       expiresAt: "2026-12-29T10:00:00.000Z",

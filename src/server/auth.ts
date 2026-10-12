@@ -1,14 +1,14 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
-import type { ApiToken, Role, User } from "../contracts";
+import type { ApiToken, Role, TeamRole, User } from "../contracts";
 import { db, transaction } from "./db";
-import { AppError, isUniqueViolation } from "./errors";
+import { AppError, isUniqueViolation, notFound } from "./errors";
 import { hashPassword, verifyLoginPassword, verifyPassword } from "./passwords";
 
 /** Credential references are internal and never serialized in public contracts. */
 export type Principal = { user: User; scope: "read" | "write" } & (
   | { authentication: "session"; sessionHash: string }
-  | { authentication: "token"; tokenHash: string }
+  | { authentication: "token"; tokenHash: string; teamId: string }
 );
 export interface UserRow {
   id: string;
@@ -20,6 +20,7 @@ export interface UserRow {
 }
 interface TokenRow {
   id: string;
+  team_id: string;
   name: string;
   scope: "read" | "write";
   created_at: Date;
@@ -60,6 +61,7 @@ export function userFromRow(row: UserRow): User {
 function tokenFromRow(row: TokenRow): ApiToken {
   return {
     id: row.id,
+    teamId: row.team_id,
     name: row.name,
     scope: row.scope,
     createdAt: row.created_at.toISOString(),
@@ -93,7 +95,7 @@ export function assertReady(principal: Principal): void {
 }
 export function assertWrite(principal: Principal): void {
   assertReady(principal);
-  if (principal.user.role === "viewer" || principal.scope !== "write")
+  if (principal.scope !== "write")
     throw new AppError(403, "FORBIDDEN", "Du har endast läsbehörighet.");
 }
 export function assertAdmin(principal: Principal): void {
@@ -104,8 +106,85 @@ export function assertAdmin(principal: Principal): void {
       "SESSION_REQUIRED",
       "Hantera användare via en inloggad webbsession.",
     );
-  if (principal.user.role !== "admin")
+  if (principal.user.role !== "global_admin")
     throw new AppError(403, "FORBIDDEN", "Administratörsbehörighet krävs.");
+}
+/** All content queries use t (team) and m (this user's membership). */
+export const teamAccessPredicate = `($2::text='global_admin' OR m.user_id IS NOT NULL) AND ($3::uuid IS NULL OR t.id=$3)`;
+export function teamAccessParameters(
+  principal: Principal,
+): [string, Role, string | null] {
+  assertReady(principal);
+  return [
+    principal.user.id,
+    principal.user.role,
+    principal.authentication === "token" ? principal.teamId : null,
+  ];
+}
+export function effectiveTeamRole(
+  principal: Principal,
+  membership: TeamRole | null,
+): TeamRole {
+  if (principal.user.role === "global_admin") return "owner";
+  if (!membership) return notFound();
+  return membership;
+}
+/** Lock order: credential user, credential, team, document. Membership changes
+ * take the team exclusively; content writes share it until commit. */
+export async function requireTeamAccess(
+  client: Pick<PoolClient, "query">,
+  principal: Principal,
+  teamId: string,
+  write = false,
+  lock?: "share" | "update",
+): Promise<TeamRole> {
+  assertReady(principal);
+  if (
+    principal.authentication === "token" &&
+    principal.teamId.toLowerCase() !== teamId.toLowerCase()
+  )
+    return notFound();
+  // Acquire the team lock before taking the membership query's snapshot. A
+  // joined SELECT waiting on the lock could otherwise retain a stale role.
+  if (lock)
+    await client.query(
+      `SELECT id FROM teams WHERE id=$1 FOR ${lock === "share" ? "SHARE" : "UPDATE"}`,
+      [teamId],
+    );
+  const row = (
+    await client.query<{ role: TeamRole | null }>(
+      `SELECT m.role FROM teams t LEFT JOIN team_memberships m ON m.team_id=t.id AND m.user_id=$2 WHERE t.id=$1`,
+      [teamId, principal.user.id],
+    )
+  ).rows[0];
+  if (!row) return notFound();
+  const role = effectiveTeamRole(principal, row.role);
+  if (write) {
+    assertWrite(principal);
+    if (role === "viewer")
+      throw new AppError(
+        403,
+        "FORBIDDEN",
+        "Du har endast läsbehörighet i teamet.",
+      );
+  }
+  return role;
+}
+export async function requireTeamOwner(
+  client: PoolClient,
+  principal: Principal,
+  id: string,
+  lock: "share" | "update" = "update",
+): Promise<void> {
+  if (principal.authentication !== "session")
+    throw new AppError(
+      403,
+      "SESSION_REQUIRED",
+      "Hantera team via en inloggad webbsession.",
+    );
+  const role = await requireTeamAccess(client, principal, id, true, lock);
+  if (role !== "owner")
+    throw new AppError(403, "FORBIDDEN", "Teamägarbehörighet krävs.");
 }
 export function assertSameOrigin(request: Request): void {
   const configured = process.env.APP_URL;
@@ -134,9 +213,14 @@ export async function findPrincipal(
     if (!bearer) return null;
     const tokenHash = secretHash(bearer[1]);
     const result = await db.query<
-      UserRow & { scope: "read" | "write"; token_id: string }
+      UserRow & {
+        scope: "read" | "write";
+        token_id: string;
+        team_id: string;
+        team_role: TeamRole | null;
+      }
     >(
-      "SELECT u.*, t.scope, t.id AS token_id FROM api_tokens t JOIN users u ON u.id=t.user_id WHERE t.secret_hash=$1 AND t.expires_at>clock_timestamp()",
+      "SELECT u.*,t.scope,t.id AS token_id,t.team_id,m.role AS team_role FROM api_tokens t JOIN users u ON u.id=t.user_id LEFT JOIN team_memberships m ON m.team_id=t.team_id AND m.user_id=u.id WHERE t.secret_hash=$1 AND t.expires_at>clock_timestamp() AND (u.role='global_admin' OR m.user_id IS NOT NULL)",
       [tokenHash],
     );
     const row = result.rows[0];
@@ -147,8 +231,12 @@ export async function findPrincipal(
     return {
       user: userFromRow(row),
       authentication: "token",
-      scope: row.scope,
+      scope:
+        row.role !== "global_admin" && row.team_role === "viewer"
+          ? "read"
+          : row.scope,
       tokenHash,
+      teamId: row.team_id,
     };
   }
   if (tokenOnly) return null;
@@ -281,9 +369,10 @@ async function lockSessionUser(
   if (principal.authentication !== "session" || !principal.sessionHash)
     throw new AppError(401, "UNAUTHENTICATED", "En aktiv webbsession krävs.");
   const row = (
-    await client.query<UserRow>("SELECT * FROM users WHERE id=$1 FOR UPDATE", [
-      principal.user.id,
-    ])
+    await client.query<UserRow>(
+      "SELECT * FROM users WHERE id=$1 FOR NO KEY UPDATE",
+      [principal.user.id],
+    )
   ).rows[0];
   const session = (
     await client.query(
@@ -312,13 +401,13 @@ export async function lockWritePrincipal(
       throw new AppError(401, "UNAUTHENTICATED", "En aktiv API-nyckel krävs.");
     const current = (
       await client.query<UserRow>(
-        "SELECT * FROM users WHERE id=$1 FOR UPDATE",
+        "SELECT * FROM users WHERE id=$1 FOR NO KEY UPDATE",
         [principal.user.id],
       )
     ).rows[0];
     const token = (
-      await client.query<{ scope: "read" | "write" }>(
-        "SELECT scope FROM api_tokens WHERE secret_hash=$1 AND user_id=$2 AND expires_at>clock_timestamp() FOR SHARE",
+      await client.query<{ scope: "read" | "write"; team_id: string }>(
+        "SELECT scope,team_id FROM api_tokens WHERE secret_hash=$1 AND user_id=$2 AND expires_at>clock_timestamp() FOR SHARE",
         [principal.tokenHash, principal.user.id],
       )
     ).rows[0];
@@ -329,7 +418,7 @@ export async function lockWritePrincipal(
         "API-nyckeln har återkallats. Anslut igen.",
       );
     row = current;
-    principal = { ...principal, scope: token.scope };
+    principal = { ...principal, scope: token.scope, teamId: token.team_id };
   }
   const verified: Principal = { ...principal, user: userFromRow(row) };
   assertWrite(verified);
@@ -419,14 +508,14 @@ export async function replaceAccount(
 export async function listTokens(principal: Principal): Promise<ApiToken[]> {
   assertReady(principal);
   const result = await db.query<TokenRow>(
-    "SELECT id,name,scope,created_at,last_used_at,expires_at,token_suffix FROM api_tokens WHERE user_id=$1 ORDER BY created_at DESC",
+    "SELECT id,team_id,name,scope,created_at,last_used_at,expires_at,token_suffix FROM api_tokens WHERE user_id=$1 ORDER BY created_at DESC",
     [principal.user.id],
   );
   return result.rows.map(tokenFromRow);
 }
 export async function createToken(
   principal: Principal,
-  input: { name: string; scope: "read" | "write" },
+  input: { name: string; scope: "read" | "write"; teamId: string },
 ): Promise<{ token: string; record: ApiToken }> {
   assertReady(principal);
   if (principal.authentication !== "session")
@@ -442,8 +531,15 @@ export async function createToken(
     const current: Principal = { ...principal, user: userFromRow(row) };
     assertReady(current);
     if (input.scope === "write") assertWrite(current);
+    await requireTeamAccess(
+      client,
+      current,
+      input.teamId,
+      input.scope === "write",
+      "share",
+    );
     const result = await client.query<TokenRow>(
-      "INSERT INTO api_tokens(id,user_id,name,scope,secret_hash,token_suffix) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,name,scope,created_at,last_used_at,expires_at,token_suffix",
+      "INSERT INTO api_tokens(id,user_id,name,scope,secret_hash,token_suffix,team_id) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id,team_id,name,scope,created_at,last_used_at,expires_at,token_suffix",
       [
         randomUUID(),
         row.id,
@@ -451,6 +547,7 @@ export async function createToken(
         input.scope,
         secretHash(token),
         token.slice(-4),
+        input.teamId,
       ],
     );
     return { token, record: tokenFromRow(result.rows[0]) };

@@ -6,9 +6,8 @@ export const statusOptions = Object.entries(statuses).map(([value, label]) => ({
   label,
 }));
 export const roles: Record<Role, string> = {
-  admin: "Administratör",
-  editor: "Redaktör",
-  viewer: "Läsare",
+  global_admin: "Globaladmin",
+  user: "Användare",
 };
 export function formatDate(value: string) {
   return new Intl.DateTimeFormat("sv-SE", {

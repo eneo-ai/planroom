@@ -121,7 +121,7 @@ describe("published REST API contracts", () => {
       enum: ["read", "write"],
     });
     expect(schemas.CreateUserRequest.properties?.role).toMatchObject({
-      enum: ["admin", "editor", "viewer"],
+      enum: ["global_admin", "user"],
     });
   });
   it("exposes small metadata responses and independent link read/write preconditions", () => {
@@ -149,11 +149,16 @@ describe("published REST API contracts", () => {
       id: "f7939fd0-381b-4c8d-9f53-5adbe728ca38",
       name: "Real admin",
       email: "admin@example.test",
-      role: "admin",
+      role: "global_admin",
       mustChangePassword: false,
     };
     const document = {
       id: "633bc16c-cd8b-4fb2-93b8-2e1b593ef52d",
+      projectId: "dca0733b-3325-4efa-9b43-2e71e537b002",
+      projectName: "Project",
+      teamId: "dca0733b-3325-4efa-9b43-2e71e537b001",
+      teamName: "Team",
+      role: "owner",
       title: "Plan",
       description: "",
       status: "draft",
@@ -179,7 +184,8 @@ describe("published REST API contracts", () => {
     expect(userResponseSchema.parse({ user })).toEqual({ user });
     expect(sessionResponseSchema.parse({ user: null })).toEqual({ user: null });
     expect(
-      documentsResponseSchema.parse({ documents: [document] }).documents[0],
+      documentsResponseSchema.parse({ documents: [document], nextCursor: null })
+        .documents[0],
     ).toHaveProperty("files", [
       { id: user.id, name: "plan.html", format: "html" },
     ]);

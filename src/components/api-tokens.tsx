@@ -9,14 +9,19 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { KeyRound, Plus, Copy, Trash2 } from "lucide-react";
-import { createTokenSchema, type ApiToken } from "@/contracts";
+import {
+  createTokenSchema,
+  canWriteTeam,
+  type ApiToken,
+  type Team,
+} from "@/contracts";
 import { api, errorMessage } from "@/client/api";
 import { formatDate } from "@/client/document-format";
-import { useSession } from "./session";
 import { McpGuide } from "./mcp-guide";
 
 export function ApiTokens() {
-  const { user } = useSession();
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [teamId, setTeamId] = useState("");
   const [tokens, setTokens] = useState<ApiToken[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasLoaded, setHasLoaded] = useState(false);
@@ -36,6 +41,7 @@ export function ApiTokens() {
     setError("");
     try {
       setTokens((await api<{ tokens: ApiToken[] }>("/api/tokens")).tokens);
+      setTeams((await api<{ teams: Team[] }>("/api/teams")).teams);
       setHasLoaded(true);
     } catch (cause) {
       setError(errorMessage(cause));
@@ -49,9 +55,11 @@ export function ApiTokens() {
   async function create(event: FormEvent) {
     event.preventDefault();
     setError("");
-    const parsed = createTokenSchema.safeParse({ name, scope });
+    const parsed = createTokenSchema.safeParse({ name, scope, teamId });
     if (!parsed.success) {
-      setError("Ge åtkomstnyckeln ett namn med högst 100 tecken.");
+      setError(
+        "Välj ett team och ge åtkomstnyckeln ett namn med högst 100 tecken.",
+      );
       return;
     }
     setBusy(true);
@@ -118,6 +126,19 @@ export function ApiTokens() {
         />
       )}
       <form onSubmit={create} className="token-create">
+        <Selector
+          label="Team"
+          value={teamId}
+          onChange={(next) => {
+            setTeamId(next);
+            setScope("read");
+          }}
+          options={teams.map((team) => ({ value: team.id, label: team.name }))}
+          placeholder="Välj team"
+          isRequired
+          width="100%"
+          isDisabled={busy}
+        />
         <TextInput
           label="Namn på åtkomstnyckel"
           value={name}
@@ -133,7 +154,9 @@ export function ApiTokens() {
           onChange={setScope}
           options={[
             { value: "read", label: "Läsa planeringar" },
-            ...(user?.role !== "viewer"
+            ...(teams.some(
+              (team) => team.id === teamId && canWriteTeam(team.role),
+            )
               ? [{ value: "write", label: "Läsa och uppdatera" }]
               : []),
           ]}
@@ -145,12 +168,13 @@ export function ApiTokens() {
           type="submit"
           variant="primary"
           isLoading={busy}
+          isDisabled={!teamId || loading}
           icon={<Plus size={16} aria-hidden />}
         />
       </form>
       <p className="fine-print">
-        En nyckel ger aldrig större behörighet än ditt konto. Använd en separat
-        nyckel per klient och återkalla den när den inte längre behövs.
+        Varje nyckel gäller ett team och din aktuella teamroll. Använd en
+        separat nyckel per klient och återkalla den när den inte längre behövs.
       </p>
       {loading ? (
         <p role="status">Hämtar åtkomstnycklar…</p>
@@ -167,6 +191,11 @@ export function ApiTokens() {
               <KeyRound size={19} aria-hidden />
               <div>
                 <strong>{token.name}</strong>
+                <p className="muted">
+                  Team:{" "}
+                  {teams.find((team) => team.id === token.teamId)?.name ??
+                    "Tidigare team"}
+                </p>
                 <p>
                   {token.maskedToken ? (
                     <code
