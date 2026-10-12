@@ -1,6 +1,6 @@
 # Validation record
 
-Latest local verification: **2026-09-30**, after the security review, fullscreen preview, Astryx adoption and private repository preparation. Findings and their fixes are recorded in [SECURITY_REVIEW.md](SECURITY_REVIEW.md).
+Latest local verification: **2026-10-12**, for team-scoped projects and public read links (see the final entry). The original security review and its fixes are recorded in [SECURITY_REVIEW.md](SECURITY_REVIEW.md).
 
 ## Current security changes
 
@@ -104,3 +104,15 @@ Remote CI [36863776666](https://github.com/eneo-ai/planroom/actions/runs/3686377
 The existing production browser showed 37 saved objects while the native SDK API reported zero elements after initialization. The new real-SDK mount regression test reproduces that empty scene with the original CanvasSurface, and passes with declarative initialData and post-loading updates. It also covers fullscreen-style remounting and camera preservation when AI updates the scene. DOM drawing/font shims validate lifecycle state, not pixels.
 
 Guarded TypeScript and three focused canvas test files passed: 14 tests, one worker, measured peak below 650 MiB. The control run intentionally failed the original viewer's scene assertion, then restored the corrected source. No local server, production build, full suite or browser/E2E runner was started.
+
+## Team-scoped projects and public read links — 2026-10-12
+
+Implemented in an isolated worktree from current main, preserving the original checkout's uncommitted work. The prerequisite team/project implementation is a separate commit; it retains main's independent metadata/link versions, file collections and Excalidraw behavior. Shared content uses explicit read projections in documents.ts; projects.ts owns the versioned enable/rotate/disable lifecycle. The unrestricted global document list and global editor/viewer assumptions are removed. Public access never becomes a write principal.
+
+Guarded TypeScript and formatting of changed files pass. Twelve focused files passed 81 tests covering contracts, MCP, export, preview isolation, draft navigation, anonymous navigation and sharing controls. After dependency corrections, six focused files passed 30 tests, including native canvas conversion and the public controls. Counts overlap and must not be added together. The full npm audit reports zero advisories after Next 16.3.8, the scoped Sass update and patched KaTeX; override ownership and removal criteria are in DEPLOYMENT.md.
+
+Real PostgreSQL tests cover migration/backfill without content loss, project/team isolation (including canvas and direct reads), live membership changes, last-owner races, cursor ordering with tied microseconds, explicit public projections, current/future tasks, empty projects, cross-project denial, link rotation/revocation/reactivation, stale-version conflicts and owner-session/origin requirements. Delayed sharing writes test both revoked sessions and owners demoted while waiting for a lock. The suite clears the synthetic login admission window before each case while preserving within-case rate-limit and concurrency checks. The legacy migration fixture flushes deferred insert constraints before ALTER TABLE, and the bootstrap check compares the complete account snapshot before/after concurrent seeds.
+
+GitHub CI runs the complete single-worker suite against disposable PostgreSQL, then builds and starts the production image. Final remote results are recorded on [PR #13](https://github.com/eneo-ai/planroom/pull/13). Local verification did not start a server, production build, browser/E2E run or full suite. DOM interaction and static markup checks establish behavior and HTML isolation, not browser pixel/layout verification.
+
+Migrations 008/009 were not applied to user data. They preserve existing content/history, place existing accounts/keys/tasks in an initial team/project and start every project with public sharing disabled. Back up before rollout; a pre-team application image must not write to the upgraded database. Keep the matching backup/image for recovery. Revocation blocks subsequent reads but cannot recall already delivered or saved content. Public links are capability secrets, excluded from ordinary project responses and requiring protection in database backups and access logs.
