@@ -4,16 +4,10 @@ import { describe, expect, it } from "vitest";
 import { parse, type DefaultTreeAdapterMap } from "parse5";
 import {
   sharedDocumentSchema,
-  sharedDocumentSummarySchema,
-  sharedProjectSchema,
-  updateProjectSharingSchema,
+  updateDocumentSharingSchema,
   publicShareTokenSchema,
 } from "../src/contracts";
-import {
-  getSharedDocument,
-  listSharedDocuments,
-} from "../src/server/documents";
-import { getSharedProject } from "../src/server/projects";
+import { getSharedDocument } from "../src/server/documents";
 import { SharedDocumentView } from "../src/components/shared-document";
 import { openApiDocument } from "../src/server/openapi";
 import config from "../next.config";
@@ -50,7 +44,7 @@ const document = {
   githubLinks: ["https://github.com/private/repo/issues/1"],
 };
 
-describe("public project sharing contract", () => {
+describe("public planning item sharing contract", () => {
   it("has explicit public projections and strict owner decisions", () => {
     expect(Object.keys(sharedDocumentSchema.parse(document)).sort()).toEqual(
       [
@@ -63,27 +57,17 @@ describe("public project sharing contract", () => {
         "canvas",
       ].sort(),
     );
-    expect(
-      sharedDocumentSummarySchema.parse(document).files[0],
-    ).not.toHaveProperty("content");
-    expect(
-      sharedProjectSchema.parse({
-        name: "Project",
-        description: "",
-        teamName: "Private team",
-        public_share_token: "secret",
-      }),
-    ).toEqual({ name: "Project", description: "" });
     for (const input of [
       { action: "enable" },
       { action: "publish", expectedVersion: 1 },
       { action: "enable", expectedVersion: 0 },
       { action: "enable", expectedVersion: 1, role: "editor" },
     ])
-      expect(updateProjectSharingSchema.safeParse(input).success).toBe(false);
+      expect(updateDocumentSharingSchema.safeParse(input).success).toBe(false);
     for (const action of ["enable", "rotate", "disable"])
       expect(
-        updateProjectSharingSchema.parse({ action, expectedVersion: 1 }).action,
+        updateDocumentSharingSchema.parse({ action, expectedVersion: 1 })
+          .action,
       ).toBe(action);
   });
   it("rejects malformed links uniformly before persistence", async () => {
@@ -95,15 +79,10 @@ describe("public project sharing contract", () => {
       "a".repeat(42) + "/",
     ]) {
       expect(publicShareTokenSchema.safeParse(token).success).toBe(false);
-      for (const read of [
-        () => getSharedProject(token),
-        () => listSharedDocuments(token),
-        () => getSharedDocument(token, document.id),
-      ])
-        await expect(read()).rejects.toMatchObject({
-          status: 404,
-          code: "NOT_FOUND",
-        });
+      await expect(getSharedDocument(token)).rejects.toMatchObject({
+        status: 404,
+        code: "NOT_FOUND",
+      });
     }
   });
   it("renders a read-only task with its original HTML confined to an opaque iframe", () => {
@@ -144,8 +123,14 @@ describe("public project sharing contract", () => {
     }
     for (const method of ["get", "put"] as const)
       expect(
-        openApiDocument.paths["/api/projects/{id}/sharing"][method]?.security,
+        openApiDocument.paths["/api/documents/{id}/sharing"][method]?.security,
       ).toEqual([{ sessionCookie: [] }]);
+    expect(
+      Object.keys(openApiDocument.paths).filter((path) =>
+        path.startsWith("/api/shared/"),
+      ),
+    ).toEqual(["/api/shared/{token}"]);
+    expect(openApiDocument.paths["/api/projects/{id}/sharing"]).toBeUndefined();
     const headers = await config.headers?.();
     for (const source of ["/shared/:path*", "/api/shared/:path*"])
       expect(headers?.find((item) => item.source === source)?.headers).toEqual(

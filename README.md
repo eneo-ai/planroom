@@ -21,7 +21,7 @@ Developed for shared planning at **Sundsvalls kommun**, Sweden. The repository i
 
 **Early-stage software:** suitable for evaluation by a trusted team. It has a Swedish interface with team-scoped projects and optional public read links. Review the [limitations](#limits-and-security-boundaries) and [deployment guide](docs/DEPLOYMENT.md) before using it with sensitive information.
 
-Projects can be shared with external reviewers through **Projekt → Publik delning**. A team owner activates a link; anyone holding it can read the project's current and future tasks, files and diagrams without an account. Internal instructions, discussion, history, people and GitHub references stay private. Owners can replace or disable the link at any time. All projects start private. See the [sharing contract](docs/CONTRACT.md#teams-projects-and-public-sharing) for scope and recovery details.
+Each project contains planning items, and each planning item groups its HTML/Markdown files and saved sketch. Share one item with external reviewers through **Planering → Dela publikt**. A team owner activates a read-only link; anyone holding it can read only that item's current files and sketch without an account, including later updates to the same item. Other planning items stay private. Internal instructions, discussion, history, people and GitHub references stay private. Owners can replace or disable the link at any time. All items start private. Migration 010 revokes previous project-wide links; owners must explicitly activate new links for the intended items. See the [sharing contract](docs/CONTRACT.md#teams-projects-and-public-sharing).
 
 ## ✨ What it does
 

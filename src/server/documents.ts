@@ -4,7 +4,7 @@ import {
   type Canvas,
 } from "../canvas";
 import type { CanvasUpdate, DocumentCanvas } from "../contracts";
-import { randomUUID } from "node:crypto";
+import { randomUUID, randomBytes } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type { PoolClient } from "pg";
 import type {
@@ -12,7 +12,8 @@ import type {
   DocumentContent,
   DocumentCreate,
   SharedDocument,
-  SharedDocumentSummary,
+  DocumentSharing,
+  DocumentSharingUpdate,
   TeamRole,
   DocumentDetail,
   DocumentGitHubLinksUpdate,
@@ -29,11 +30,13 @@ import type {
   PlanningFileSummary,
 } from "../contracts";
 import {
+  publicShareTokenSchema,
   canEditDocumentContent,
   documentStatusLabels,
   documentCursorSchema,
 } from "../contracts";
 import {
+  requireTeamOwner,
   assertReady,
   assertWrite,
   lockWritePrincipal,
@@ -42,7 +45,7 @@ import {
   teamAccessPredicate,
   type Principal,
 } from "./auth";
-import { lockProjectAccess, assertPublicShareToken } from "./projects";
+import { lockProjectAccess, getProject } from "./projects";
 import { db, transaction } from "./db";
 import { AppError, notFound } from "./errors";
 
@@ -680,37 +683,94 @@ export async function updateDocumentCanvas(
   return canvasDetail(updated);
 }
 
-// These projections read the same current metadata and immutable file/canvas
-// revision as authenticated reads, but cannot be used as a write principal.
-export async function listSharedDocuments(
-  token: string,
-  cursor?: string,
-): Promise<SharedDocumentSummary[]> {
-  assertPublicShareToken(token);
-  const position = parseDocumentCursor(cursor);
-  // A lateral left join distinguishes an empty project from a revoked link in
-  // one snapshot. The query never reads file bodies for the list.
-  const rows = (
-    await db.query<{ document: SharedDocumentSummary | null }>(
-      `SELECT item.document FROM projects p LEFT JOIN LATERAL (
-      SELECT d.updated_at,d.id,jsonb_build_object('id',d.id,'title',d.title,'description',d.description,
-        'status',d.status,'updatedAt',to_char(d.updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
-        'files',(SELECT jsonb_agg(file - 'content' ORDER BY ordinal) FROM jsonb_array_elements(r.files) WITH ORDINALITY AS entries(file,ordinal))) AS document
-      FROM documents d JOIN document_revisions r ON r.document_id=d.id AND r.number=d.current_revision
-      WHERE d.project_id=p.id AND ($2::timestamptz IS NULL OR (d.updated_at,d.id)<($2::timestamptz,$3::uuid))
-      ORDER BY d.updated_at DESC,d.id DESC LIMIT 100
-    ) item ON true WHERE p.public_share_token=$1 ORDER BY item.updated_at DESC,item.id DESC`,
-      [token, position?.updatedAt ?? null, position?.id ?? null],
-    )
-  ).rows;
-  if (!rows.length) notFound();
-  return rows.flatMap((row) => (row.document ? [row.document] : []));
+async function requireDocumentSharingOwner(
+  client: PoolClient,
+  principal: Principal,
+  id: string,
+): Promise<void> {
+  const verified = await lockWritePrincipal(client, principal);
+  const project = await getProject(
+    verified,
+    await documentProjectId(client, verified, id),
+    client,
+  );
+  await requireTeamOwner(client, verified, project.teamId, "share");
 }
+
+interface SharingRow {
+  public_share_token: string | null;
+  public_share_version: number;
+}
+function sharing(row: SharingRow): DocumentSharing {
+  return {
+    path:
+      row.public_share_token === null
+        ? null
+        : `/shared/${row.public_share_token}`,
+    version: row.public_share_version,
+  };
+}
+export async function getDocumentSharing(
+  principal: Principal,
+  id: string,
+): Promise<DocumentSharing> {
+  return transaction(async (client) => {
+    await requireDocumentSharingOwner(client, principal, id);
+    const row = (
+      await client.query<SharingRow>(
+        "SELECT public_share_token,public_share_version FROM documents WHERE id=$1",
+        [id],
+      )
+    ).rows[0];
+    return sharing(row);
+  });
+}
+export async function updateDocumentSharing(
+  principal: Principal,
+  id: string,
+  input: DocumentSharingUpdate,
+): Promise<DocumentSharing> {
+  return transaction(async (client) => {
+    await requireDocumentSharingOwner(client, principal, id);
+    const current = (
+      await client.query<SharingRow>(
+        "SELECT public_share_token,public_share_version FROM documents WHERE id=$1 FOR UPDATE",
+        [id],
+      )
+    ).rows[0];
+    if (current.public_share_version !== input.expectedVersion)
+      throw new AppError(
+        409,
+        "SHARING_CONFLICT",
+        "Delningen har ändrats. Hämta aktuell inställning innan du försöker igen.",
+      );
+    if (
+      (input.action === "enable" && current.public_share_token !== null) ||
+      (input.action === "disable" && current.public_share_token === null)
+    )
+      return sharing(current);
+    if (input.action === "rotate" && current.public_share_token === null)
+      throw new AppError(
+        409,
+        "SHARING_DISABLED",
+        "Aktivera delning innan du byter länk.",
+      );
+    const token =
+      input.action === "disable" ? null : randomBytes(32).toString("base64url");
+    const next = (
+      await client.query<SharingRow>(
+        "UPDATE documents SET public_share_token=$2,public_share_version=public_share_version+1 WHERE id=$1 RETURNING public_share_token,public_share_version",
+        [id, token],
+      )
+    ).rows[0];
+    return sharing(next);
+  });
+}
+// An active token identifies exactly one planning item, never its project.
 export async function getSharedDocument(
   token: string,
-  id: string,
 ): Promise<SharedDocument> {
-  assertPublicShareToken(token);
+  if (!publicShareTokenSchema.safeParse(token).success) notFound();
   const row = (
     await db.query<{
       id: string;
@@ -722,10 +782,10 @@ export async function getSharedDocument(
       updated_at: Date;
     }>(
       `SELECT d.id,d.title,d.description,d.status,r.files,r.canvas,d.updated_at
-     FROM documents d JOIN projects p ON p.id=d.project_id
+     FROM documents d
      JOIN document_revisions r ON r.document_id=d.id AND r.number=d.current_revision
-     WHERE p.public_share_token=$1 AND d.id=$2`,
-      [token, id],
+     WHERE d.public_share_token=$1`,
+      [token],
     )
   ).rows[0];
   if (!row) notFound();

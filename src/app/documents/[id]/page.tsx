@@ -19,6 +19,7 @@ import {
   LockKeyhole,
   Github,
   Sparkles,
+  Share2,
 } from "lucide-react";
 import {
   documentContentSchema,
@@ -42,6 +43,7 @@ import { DocumentFields } from "@/components/document-fields";
 import { PlanningFileImport } from "@/components/document-files";
 import { PlanningFileViewer } from "@/components/planning-file-viewer";
 import { DocumentComments } from "@/components/document-comments";
+import { DocumentSharingSettings } from "@/components/document-sharing";
 import { DocumentCanvas } from "@/components/document-canvas";
 import { DocumentHistory } from "@/components/document-history";
 import {
@@ -258,7 +260,11 @@ export default function DocumentPage() {
       />
     );
   const showEditor = canWrite && (canEdit || dirty);
-  const activeTab = tab === "edit" && !showEditor ? "preview" : tab;
+  const canShare = document.role === "owner";
+  const activeTab =
+    (tab === "edit" && !showEditor) || (tab === "sharing" && !canShare)
+      ? "preview"
+      : tab;
   const tabs = [
     { value: "preview", label: "Planering", icon: Eye },
     { value: "canvas", label: "Visualisering", icon: Sparkles },
@@ -274,6 +280,7 @@ export default function DocumentPage() {
     { value: "instructions", label: "AI-instruktioner", icon: Bot },
     { value: "comments", label: "Diskussion", icon: MessageSquare },
     { value: "history", label: "Historik", icon: History },
+    ...(canShare ? [{ value: "sharing", label: "Delning", icon: Share2 }] : []),
   ];
   return (
     <div className="page-stack">
@@ -326,8 +333,15 @@ export default function DocumentPage() {
             icon={<Github size={16} aria-hidden />}
             onClick={() => setGithubOpen(true)}
           />
+          {canShare && (
+            <Button
+              label="Dela publikt"
+              icon={<Share2 size={16} aria-hidden />}
+              onClick={() => changeTab("sharing")}
+            />
+          )}
           <Button
-            label="Kopiera länk"
+            label="Kopiera intern länk"
             icon={<Link2 size={16} aria-hidden />}
             onClick={() => void copyLink()}
           />
@@ -586,6 +600,15 @@ export default function DocumentPage() {
           />
         )}
       </section>
+      {canShare && activeTab === "sharing" && (
+        <section
+          role="tabpanel"
+          id="panel-sharing"
+          aria-labelledby="tab-sharing"
+        >
+          <DocumentSharingSettings key={document.id} documentId={document.id} />
+        </section>
+      )}
       <Dialog
         isOpen={discard}
         onOpenChange={setDiscard}

@@ -108,7 +108,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
             />
             {user && (
               <SideNavItem
-                label="Ny uppgift"
+                label="Ny planering"
                 icon={<Plus size={18} aria-hidden />}
                 href="/documents/new"
                 isSelected={pathname === "/documents/new"}

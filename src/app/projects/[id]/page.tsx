@@ -13,7 +13,6 @@ import {
   type Project,
 } from "@/contracts";
 import { api, errorMessage } from "@/client/api";
-import { ProjectSharingSettings } from "@/components/project-sharing";
 import { DocumentList } from "@/components/document-list";
 
 export default function ProjectPage() {
@@ -93,9 +92,6 @@ export default function ProjectPage() {
         />
       )}
       <DocumentList key={project.id} project={project} />
-      {project.role === "owner" && (
-        <ProjectSharingSettings key={project.id} projectId={project.id} />
-      )}
       {canWriteTeam(project.role) && (
         <section className="narrow-content page-stack">
           <h2>Projektinställningar</h2>

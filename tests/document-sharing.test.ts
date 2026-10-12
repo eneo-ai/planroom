@@ -2,11 +2,11 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ProjectSharingSettings } from "../src/components/project-sharing";
+import { DocumentSharingSettings } from "../src/components/document-sharing";
 
 let root: Root;
 let container: HTMLDivElement;
-const requests: { method: string; body: unknown }[] = [];
+const requests: { path: string; method: string; body: unknown }[] = [];
 let state = { path: null as string | null, version: 1 };
 let conflict = false;
 function button(label: string): HTMLButtonElement {
@@ -26,10 +26,10 @@ beforeEach(() => {
   requests.length = 0;
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (_path: string, init?: RequestInit) => {
+    vi.fn(async (path: string, init?: RequestInit) => {
       if (init?.method === "PUT") {
         const body: unknown = JSON.parse(String(init.body));
-        requests.push({ method: "PUT", body });
+        requests.push({ path, method: "PUT", body });
         if (conflict)
           return Response.json(
             {
@@ -63,17 +63,21 @@ describe("owner sharing controls", () => {
   it("explains scope before publishing and shows the saved link, then confirms revocation", async () => {
     await act(async () =>
       root.render(
-        createElement(ProjectSharingSettings, { projectId: "project" }),
+        createElement(DocumentSharingSettings, { documentId: "plan" }),
       ),
     );
-    expect(container.textContent).toContain("Projektet delas inte publikt");
+    expect(container.textContent).toContain("Planeringen delas inte publikt");
     await click("Aktivera publik delning");
     expect(document.body.textContent).toContain(
-      "även uppgifter som läggs till senare",
+      "Andra planeringar i projektet förblir privata",
     );
     expect(requests).toEqual([]);
     await click("Aktivera delning");
-    expect(requests[0].body).toEqual({ action: "enable", expectedVersion: 1 });
+    expect(requests[0]).toEqual({
+      path: "/api/documents/plan/sharing",
+      method: "PUT",
+      body: { action: "enable", expectedVersion: 1 },
+    });
     expect(document.querySelector("input")?.readOnly).toBe(true);
     expect(document.querySelector("input")?.value).toContain(state.path);
     expect(container.textContent).toContain("Alla med länken kan läsa");
@@ -89,13 +93,13 @@ describe("owner sharing controls", () => {
       if (confirm instanceof HTMLButtonElement) confirm.click();
     });
     expect(requests[1].body).toEqual({ action: "disable", expectedVersion: 2 });
-    expect(container.textContent).toContain("Projektet delas inte publikt");
+    expect(container.textContent).toContain("Planeringen delas inte publikt");
     expect(document.querySelector("input")).toBeNull();
   });
   it("requires reviewing refreshed state after a conflict, without automatic retry", async () => {
     await act(async () =>
       root.render(
-        createElement(ProjectSharingSettings, { projectId: "project" }),
+        createElement(DocumentSharingSettings, { documentId: "plan" }),
       ),
     );
     await click("Aktivera publik delning");

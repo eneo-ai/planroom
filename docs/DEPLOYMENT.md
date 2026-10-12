@@ -152,3 +152,9 @@ Deferred updates have concrete prerequisites:
 - Node 25 (#7): outside the declared Node 22 runtime and already [end of life](https://nodejs.org/en/about/eol). A future runtime upgrade should select a supported LTS line and update Docker, CI, engines and types together.
 - Node 26 types (#12): incompatible with the intentionally retained Node 22 runtime contract; accepting newer APIs at compile time would not make them available in production.
 - Lucide 1 (#9): removes brand icons, including the Github export used by document actions and references. Resolve the icon migration and verify accessible labels before upgrading; see the [React migration guide](https://lucide.dev/guide/react/migration).
+
+## Sharing migration 010
+
+Public links now belong to one planning item instead of its entire project. Migration 010 adds private-by-default document sharing state and removes the old project tokens. Existing project links, including old task URLs under them, stop working. After deployment, owners open the intended planning item, choose **Dela publikt**, activate sharing and distribute its new link. Current and future siblings remain private; later edits to the shared item's own files/sketch remain visible.
+
+The migration preserves project placement, accounts, original HTML/Markdown files, canvases, comments and immutable revision history. Back up before deployment. The old image cannot manage sharing against the new schema; prefer a forward fix. A rollback needs the matching image/backup and can reactivate broad project links, so review and revoke those before restoring external access. Never reset the database or remove its volume for this upgrade.

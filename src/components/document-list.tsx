@@ -95,12 +95,12 @@ export function DocumentList({ project }: { project: Project }) {
           <h1>{project.name}</h1>
           <p className="muted">
             {project.description ||
-              "Samla uppgifter, skisser och instruktioner i projektet."}
+              "Samla planeringar med HTML-filer, Markdown-filer och skisser i projektet."}
           </p>
         </div>
         {canWrite && (
           <Button
-            label="Ny uppgift"
+            label="Ny planering"
             href={`/projects/${project.id}/new`}
             variant="primary"
             icon={<Plus size={18} aria-hidden />}
@@ -196,7 +196,7 @@ export function DocumentList({ project }: { project: Project }) {
               !query &&
               !status && (
                 <Button
-                  label="Skapa första uppgiften"
+                  label="Skapa första planeringen"
                   href={`/projects/${project.id}/new`}
                   variant="primary"
                   icon={<Plus size={18} aria-hidden />}
@@ -208,7 +208,7 @@ export function DocumentList({ project }: { project: Project }) {
       ) : (
         <>
           <div className="collection-caption">
-            <h2>Uppgifter</h2>
+            <h2>Planeringar</h2>
             <span className="muted" role="status">
               {documents.length}{" "}
               {documents.length === 1 ? "planering" : "planeringar"}
@@ -291,7 +291,7 @@ export function DocumentList({ project }: { project: Project }) {
       )}
       {nextCursor && (
         <Button
-          label="Visa fler uppgifter"
+          label="Visa fler planeringar"
           onClick={() => void more()}
           isLoading={paging}
           isDisabled={loading}

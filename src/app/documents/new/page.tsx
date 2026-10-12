@@ -45,14 +45,14 @@ export default function NewDocumentPage() {
   if (!projects.length)
     return (
       <EmptyState
-        title="Du har inget projekt att skapa uppgifter i"
+        title="Du har inget projekt att skapa planeringar i"
         description="Be en teamägare om redaktörsbehörighet och skapa ett projekt i teamet."
       />
     );
   return (
     <div className="page-stack">
       <Selector
-        label="Projekt för den nya uppgiften"
+        label="Projekt för den nya planeringen"
         value={projectId}
         onChange={(next) => requestLeave(() => setProjectId(next))}
         options={projects.map((entry) => ({
@@ -67,7 +67,7 @@ export default function NewDocumentPage() {
       {project ? (
         <NewDocument key={project.id} project={project} />
       ) : (
-        <p>Välj projektet som uppgiften ska tillhöra.</p>
+        <p>Välj projektet som planeringen ska tillhöra.</p>
       )}
     </div>
   );
