@@ -33,7 +33,7 @@
   },
   "dependencies": {
     "@astryxdesign/core": "0.6.3",
-    "@astryxdesign/theme-neutral": "0.6.3",
+    "@astryxdesign/theme-neutral": "0.6.8",
     "@excalidraw/excalidraw": "0.18.1",
     "@modelcontextprotocol/sdk": "1.32.0",
     "@scalar/api-reference-react": "0.9.76",
