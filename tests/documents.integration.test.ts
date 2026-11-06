@@ -1979,7 +1979,11 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
           .object({ files: planningFilesSchema, currentRevision: z.number() })
           .parse(parsed),
       ).toEqual({ files: content.files, currentRevision: 1 });
-      const { projectId: _projectId, ...updateContent } = content;
+      const {
+        projectId: _projectId,
+        canvas: _canvas,
+        ...updateContent
+      } = content;
       const update = {
         id: original.id,
         ...updateContent,
