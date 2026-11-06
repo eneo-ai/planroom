@@ -12,7 +12,7 @@ GET /api/auth/session -> {user: User|null}
 POST /api/auth/logout -> {ok:true}; expires cookie.
 POST /api/auth/setup body {name,email,currentPassword,password} -> {user}; changes initial credentials, rotates sessions. Allowed for any signed-in user; requires current password.
 GET /api/documents?q=&status=&projectId=&teamId=&cursor= -> {documents:DocumentSummary[],nextCursor:string|null}; at most 100 authorized results, newest first, with microsecond-preserving cursors.
-POST /api/documents body DocumentCreate (DocumentContent plus required projectId) -> DocumentDetail (201)
+POST /api/documents body DocumentCreate (DocumentContent plus required projectId and optional canvas) -> DocumentDetail (201)
 GET /api/documents/:id -> DocumentDetail
 PUT /api/documents/:id body DocumentUpdate -> DocumentDetail (409 DOCUMENT_CONFLICT on stale document version)
 PUT /api/documents/:id/status body {expectedVersion,status} -> DocumentSummary; status-only metadata update preserves the file revision and GitHub references.
@@ -59,7 +59,7 @@ Script consent belongs to the currently displayed source and resets on source ch
 
 ## AI canvas
 
-DocumentDetail and RevisionDetail include `canvas: null | {schemaVersion: 1, title, shapes}`. The nullable snapshot is stored with the immutable file collection. Lists omit canvas bodies. File-only writes preserve the current canvas; restore copies both files and canvas, retaining current GitHub references.
+DocumentDetail and RevisionDetail include `canvas: null | {schemaVersion: 1, title, shapes}`. The nullable snapshot is stored with the immutable file collection. A new document may carry a complete canvas in revision 1; it is validated like any canvas, and an invalid one refuses the whole create. Lists omit canvas bodies. File-only writes preserve the current canvas; restore copies both files and canvas, retaining current GitHub references.
 
 `GET /api/documents/{id}/canvas` returns `{documentId, version, currentRevision, status, canvas}` without file bodies. `POST` takes `{expectedVersion, changeSummary, operations}` and returns the same saved state. Authentication, scope, live credential locks and draft/active editability match document writes. Conflicts return DOCUMENT_CONFLICT/currentVersion. Invalid scene references or removals return INVALID_CANVAS_OPERATION with no persistence. Changed batches create one content revision and advance document version; identical batches are no-ops.
 

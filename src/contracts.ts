@@ -323,6 +323,7 @@ export const documentContentSchema = z.strictObject({
 });
 export const createDocumentSchema = documentContentSchema.extend({
   projectId: z.uuid(),
+  canvas: canvasSchema.nullable().default(null),
 });
 export type DocumentCreate = z.infer<typeof createDocumentSchema>;
 export const updateDocumentSchema = documentContentSchema.extend({
