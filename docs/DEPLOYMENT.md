@@ -122,11 +122,11 @@ If an upgrade fails, first preserve the current database so later changes can be
 
 Official Node/PostgreSQL base images and GitHub Actions are pinned to verified digests/commit SHAs. npm uses its committed lockfile. Weekly Dependabot pull requests cover npm, Docker, Compose and Actions; review them and keep the PostgreSQL image consistent across Compose, CI and the disposable test script. Never use automatic force-downgrades to silence an audit.
 
-## API reference dependency pin
+## API reference dependencies
 
-The bundled Scalar reference is client-only; fonts, telemetry, hosted agents and proxy services are disabled. Its transitive dependencies pin older Undici and AI SDK provider utilities. `package.json` selects patched Undici 7.30.0 and `@ai-sdk/provider-utils` 4.0.33 within their existing major lines. Both support Node.js 22. The provider utilities update addresses [GHSA-866g-f22w-33x8](https://github.com/advisories/GHSA-866g-f22w-33x8).
+The bundled Scalar reference is client-only; fonts, telemetry, hosted agents and proxy services are disabled. Scalar 0.9.88 resolves patched Undici and AI SDK provider utilities on its own, so `package.json` no longer overrides either. Several Scalar packages declare Node.js 22.19.0 or later, but they run only in the browser and the Planroom server never loads them.
 
-The reference integration owns these overrides. Remove each when Scalar's selected dependency tree resolves a patched version without it, after checking the complete npm audit and reference transport tests. CI fails on advisories of any reported severity, including development dependencies. No automatic `audit --force` downgrade is used.
+Do not add an override unless Scalar's selected dependency tree leaves an advisory open, and remove it once a Scalar update resolves a patched version. Check the complete npm audit and reference transport tests either way. CI fails on advisories of any reported severity, including development dependencies. No automatic `audit --force` downgrade is used.
 
 ## Native AI diagram SDK
 
