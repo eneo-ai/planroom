@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { scrypt } from "node:crypto";
+import { canvasSchema } from "../src/canvas";
 import { verifyPassword } from "../src/server/passwords";
 import { db, transaction } from "../src/server/db";
 import { migrate } from "../src/server/migrate";
@@ -2344,6 +2345,21 @@ describe.skipIf(!enabled)("PostgreSQL document and identity behavior", () => {
     expect(await listComments(principal, document.id)).toEqual([]);
     await deleteToken(principal, key.record.id);
   });
+
+  it("stores a sketch given at creation in the first revision", async () => {
+    const canvas = canvasSchema.parse({
+      schemaVersion: 1,
+      title: "Beslut",
+      shapes: [{ id: "a", type: "note", text: "Vi väljer A", x: 0, y: 0 }],
+    });
+
+    const plan = await createDocument(principal, { ...content, canvas });
+
+    expect(plan).toMatchObject({ currentRevision: 1, version: 1, canvas });
+    expect((await getDocument(principal, plan.id)).canvas).toEqual(canvas);
+    expect((await getRevision(principal, plan.id, 1)).canvas).toEqual(canvas);
+  });
+
   it("saves AI diagrams in content history, preserves original sources and restores the complete content", async () => {
     const original = await createDocument(principal, content);
     expect(original.canvas).toBeNull();

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   commentSchema,
+  createDocumentSchema,
   createTokenSchema,
   createUserSchema,
   documentContentSchema,
@@ -30,6 +31,29 @@ const content = {
 };
 
 describe("planning input contract", () => {
+  it("takes a sketch with a new document and defaults to none", () => {
+    const projectId = "123e4567-e89b-42d3-a456-426614174001";
+    const canvas = {
+      schemaVersion: 1,
+      title: "Beslut",
+      shapes: [{ id: "a", type: "note", text: "Vi väljer A", x: 0, y: 0 }],
+    };
+
+    expect(
+      createDocumentSchema.parse({ ...content, projectId }).canvas,
+    ).toBeNull();
+    expect(
+      createDocumentSchema.parse({ ...content, projectId, canvas }).canvas,
+    ).toMatchObject({ title: "Beslut", shapes: [{ text: "Vi väljer A" }] });
+    expect(
+      createDocumentSchema.safeParse({
+        ...content,
+        projectId,
+        canvas: { ...canvas, shapes: [{ id: "a", type: "script" }] },
+      }).success,
+    ).toBe(false);
+  });
+
   it("preserves the original HTML and instructions while defaulting document metadata", () => {
     const instructions =
       "  Läs besluten före uppdatering.\nBevara diagrammen.  ";

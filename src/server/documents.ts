@@ -300,7 +300,7 @@ export async function createDocumentInTransaction(
       content.projectId,
     ],
   );
-  await insertRevision(client, author, id, 1, content, [], null);
+  await insertRevision(client, author, id, 1, content, [], content.canvas);
   return id;
 }
 async function lockDocument(
