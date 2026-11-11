@@ -32,7 +32,7 @@
     "prebuild": "node scripts/copy-canvas-assets.mjs"
   },
   "dependencies": {
-    "@astryxdesign/core": "0.6.3",
+    "@astryxdesign/core": "0.7.11",
     "@astryxdesign/theme-neutral": "0.6.3",
     "@excalidraw/excalidraw": "0.18.1",
     "@modelcontextprotocol/sdk": "1.32.0",
